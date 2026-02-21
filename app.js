@@ -77,14 +77,6 @@ function setAuthLoading(loading) {
 /* ============================================================
    AUTH
 ============================================================ */
-function showAuthLoader() {
-  document.getElementById('authLoader').style.display = 'flex';
-}
-
-function hideAuthLoader() {
-  document.getElementById('authLoader').style.display = 'none';
-}
-
 function toggleMode() {
   _isSignup = !_isSignup;
   document.getElementById('confirmWrap').style.display = _isSignup ? 'block' : 'none';
@@ -127,7 +119,7 @@ async function handleAuth() {
     }
     const { error } = await sb.auth.signUp({ email, password });
     setAuthLoading(false);
-    if (error) { hideAuthLoader(); msg.innerText = error.message; msg.className = 'auth-message msg-error'; return; }
+    if (error) { msg.innerText = error.message; msg.className = 'auth-message msg-error'; return; }
     msg.innerText = '✅ Account created! Sign in below.';
     msg.className = 'auth-message msg-success';
     toggleMode();
@@ -137,14 +129,11 @@ async function handleAuth() {
   // Mark OTP flow as pending BEFORE signing in, so onAuthStateChange ignores the SIGNED_IN event
   window._pendingEmail = email;
 
-  showAuthLoader();
-
   // Sign in — verify password first
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   setAuthLoading(false);
 
   if (error) {
-    hideAuthLoader();
     window._pendingEmail = null;
     msg.innerText = 'Invalid email or password.';
     msg.className = 'auth-message msg-error';
@@ -164,7 +153,7 @@ async function handleAuth() {
     msg.className = 'auth-message msg-error';
     return;
   }
-hideAuthLoader();
+
   showOTPScreen();
 }
 
@@ -249,11 +238,7 @@ async function resendOTP() {
 ============================================================ */
 async function loginSuccess(user) {
   _currentUser = user;
-  const settings = getSettings();
-const displayName =
-  settings.profile.username?.trim()
-  || user.user_metadata?.full_name
-  || user.email.split('@')[0];
+  const displayName = user.email.split('@')[0];
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('otpScreen').style.display   = 'none';
   document.querySelector('.shell').style.display       = 'flex';
@@ -576,14 +561,7 @@ function updateClock() {
   const greet  = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night';
   const emojis = { morning:'☀️', afternoon:'🌤️', evening:'🌙', night:'⭐' };
   const tkey   = h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night';
-  let name = '';
-if (_currentUser) {
-  const settings = getSettings();
-  name =
-    settings.profile.username?.trim()
-    || _currentUser.user_metadata?.full_name
-    || _currentUser.email.split('@')[0];
-}
+  const name   = _currentUser ? _currentUser.email.split('@')[0] : '';
   document.getElementById('liveClock').innerText    = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   document.getElementById('liveDate').innerText     = now.toLocaleDateString();
   document.getElementById('clockBig').innerText     = now.toLocaleTimeString();
@@ -967,6 +945,10 @@ function refreshAll() {
 function initApp() {
   const s = getSettings();
   document.body.className = s.appearance.theme || '';
+  // Restore sidebar state
+  if (localStorage.getItem('sidebarCollapsed') === 'true') {
+    document.getElementById('sidebar')?.classList.add('collapsed');
+  }
   refreshAll();
   updateClock();
   loadSettings('profile', document.querySelector('.settings-tab'));
@@ -976,7 +958,14 @@ function initApp() {
    EXPOSE ALL FUNCTIONS TO GLOBAL SCOPE
    Required so onclick="..." attributes in HTML can call them
 ============================================================ */
-window.handleAuth          = handleAuth;
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed');
+  // Persist preference
+  localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+}
+
+window.toggleSidebar = toggleSidebar;
 window.toggleMode          = toggleMode;
 window.handlePasswordReset = handlePasswordReset;
 window.verifyOTP           = verifyOTP;

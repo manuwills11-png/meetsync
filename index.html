@@ -69,11 +69,12 @@
   <div class="shell">
 
     <!-- SIDEBAR -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
         <div class="sidebar-logo-icon">⚡</div>
         <span class="sidebar-logo-text">MeetSync</span>
         <span class="sidebar-logo-badge">PRO</span>
+        <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
       </div>
       <span class="nav-label">Workspace</span>
       <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard',this)">
@@ -346,21 +347,6 @@
 
   <!-- Single script tag — no bridge needed, app.js exposes functions to window directly -->
   <script type="module" src="app.js"></script>
-<div id="authLoader" style="
-  position:fixed;
-  inset:0;
-  background:rgba(10,10,20,0.95);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  flex-direction:column;
-  z-index:9999;
-  color:white;
-  font-family:DM Sans;
-">
-  <div style="font-size:40px;margin-bottom:20px;">⏳</div>
-  <h3>Sending verification code...</h3>
-  <p style="opacity:0.7;margin-top:8px;">Please wait</p>
-</div>
+
 </body>
 </html>
