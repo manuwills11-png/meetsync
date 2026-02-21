@@ -1291,40 +1291,43 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
 }
 .sidebar-collapse-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
 
-/* Collapsed sidebar state */
+/* Collapsed sidebar — only the toggle strip is visible */
+.sidebar {
+  transition: width .25s var(--ease);
+  overflow: hidden;
+}
 .sidebar.collapsed {
-  width: clamp(52px, 6vw, 64px);
+  width: 36px;
 }
 .sidebar.collapsed .sidebar-collapse-btn {
   transform: rotate(180deg);
   margin-left: 0;
+  margin-right: 0;
 }
+/* When collapsed, only show the logo row (which contains the toggle btn) */
 .sidebar.collapsed .sidebar-logo {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
   gap: 0;
+  border-bottom: none;
+  margin-bottom: 0;
 }
+.sidebar.collapsed .sidebar-logo-icon,
 .sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-logo-badge,
 .sidebar.collapsed .nav-label,
-.sidebar.collapsed .nav-btn .badge,
-.sidebar.collapsed .user-info,
-.sidebar.collapsed .logout-btn {
+.sidebar.collapsed .nav-btn,
+.sidebar.collapsed .sidebar-spacer,
+.sidebar.collapsed .sidebar-user {
   display: none;
 }
-.sidebar.collapsed .nav-btn {
+/* The toggle button itself needs to be reachable even when collapsed */
+.sidebar.collapsed .sidebar-logo {
+  padding: 12px 0;
+  display: flex;
   justify-content: center;
-  padding: clamp(8px, 1.1vw, 10px);
-  gap: 0;
-}
-.sidebar.collapsed .nav-btn .nav-icon {
-  width:  clamp(30px, 3.8vw, 36px);
-  height: clamp(30px, 3.8vw, 36px);
-}
-.sidebar.collapsed .sidebar-user {
-  justify-content: center;
-  padding-left: 0;
+  margin-bottom: 0;
 }
 
 /* ============================================================
