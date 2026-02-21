@@ -126,6 +126,22 @@ async function handleAuth() {
     return;
   }
 
+  // Check if user has OTP enabled (default: ON)
+  const otpEnabled = (getSettings().security?.otpEnabled) !== false;
+
+  if (!otpEnabled) {
+    // OTP off — sign in directly with password, no email code needed
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    setAuthLoading(false);
+    if (error) {
+      msg.innerText = 'Invalid email or password.';
+      msg.className = 'auth-message msg-error';
+      return;
+    }
+    await loginSuccess(data.user);
+    return;
+  }
+
   // Mark OTP flow as pending BEFORE signing in, so onAuthStateChange ignores the SIGNED_IN event
   window._pendingEmail = email;
 
@@ -252,13 +268,18 @@ async function loginSuccess(user) {
 
 async function logout() {
   await sb.auth.signOut();
-  _currentUser = null;
-  _meetings    = [];
-  _recurring   = [];
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('authEmail').value           = '';
-  document.getElementById('authPassword').value        = '';
-  document.getElementById('authMessage').innerText     = '';
+  _currentUser       = null;
+  _meetings          = [];
+  _recurring         = [];
+  window._pendingEmail = null; // ← critical fix: was blocking re-login
+  // Hide shell, show login
+  document.querySelector('.shell').style.display        = 'none';
+  document.getElementById('loginScreen').style.display  = 'flex';
+  document.getElementById('otpScreen').style.display    = 'none';
+  document.getElementById('authEmail').value            = '';
+  document.getElementById('authPassword').value         = '';
+  document.getElementById('authMessage').innerText      = '';
+  document.getElementById('authMessage').className      = 'auth-message';
 }
 
 /* ============================================================
@@ -689,71 +710,77 @@ function loadSettings(section, btn) {
   if (section === 'profile') {
     const email = _currentUser ? _currentUser.email : s.profile.email;
     c.innerHTML = `<h3>Profile</h3><p class="desc">Manage your account details.</p>
-      <div class="form-group mb-4"><label class="form-label">Display Name</label><input class="form-control" id="sUsername" value="${s.profile.username}" placeholder="Your name"></div>
-      <div class="form-group mb-4"><label class="form-label">Email Address</label><input class="form-control" id="sEmail" type="email" value="${email}" disabled style="opacity:0.6;cursor:not-allowed;"></div>
-      <p style="font-size:12px;color:var(--text-3);margin-bottom:20px;">Email is managed by Supabase Auth.</p>
-      <div class="form-group mb-4"><label class="form-label">New Password</label><input class="form-control" id="sPass" type="password" placeholder="Enter new password to change"></div>
+      <div class="form-group mb-4"><label class="form-label">Display Name</label><input class="form-control" id="sUsername" value="${s.profile.username||''}" placeholder="Your name"></div>
+      <div class="form-group mb-4"><label class="form-label">Email Address</label><input class="form-control" id="sEmail" type="email" value="${email||''}" disabled style="opacity:0.6;cursor:not-allowed;"></div>
+      <p style="font-size:12px;color:var(--text-3);margin-bottom:20px;">Email is managed by Supabase Auth and cannot be changed here.</p>
+      <div class="form-group mb-4"><label class="form-label">New Password</label><input class="form-control" id="sPass" type="password" placeholder="Leave blank to keep current password"></div>
       <button class="btn-accent" onclick="saveProfile()">Save Changes</button>`;
+
   } else if (section === 'security') {
-    c.innerHTML = `<h3>Security</h3><p class="desc">Manage account security.</p>
+    const otpEnabled = s.security?.otpEnabled !== false; // default ON
+    c.innerHTML = `<h3>Security</h3><p class="desc">Manage account security settings.</p>
       <div class="setting-row">
-        <div class="setting-row-info"><h5>Two-Factor Authentication</h5><p>Use an authenticator app.</p></div>
-        <button class="btn-ghost" onclick="setup2FA()">Enable 2FA</button>
-      </div>
-      <div id="qrContainer" style="margin-top:20px;display:none;">
-        <p style="margin-bottom:10px;font-size:13px;color:var(--text-2);">Scan this QR code:</p>
-        <img id="qrCode" style="border-radius:10px;" />
-        <div style="margin-top:14px;">
-          <label class="form-label">Enter 6-digit code to confirm</label>
-          <div style="display:flex;gap:10px;margin-top:6px;">
-            <input class="form-control" type="text" id="totpCode" placeholder="123456" maxlength="6" style="max-width:160px;">
-            <button class="btn-accent" onclick="verify2FA()">Verify</button>
-          </div>
+        <div class="setting-row-info">
+          <h5>Email OTP Verification</h5>
+          <p>Require a one-time code sent to your email each time you sign in.</p>
         </div>
+        <label class="toggle otp-toggle" title="${otpEnabled?'Click to disable':'Click to enable'}">
+          <input type="checkbox" id="otpToggle" ${otpEnabled?'checked':''} onchange="toggleOTPSetting(this.checked)">
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+      <div id="otpStatusMsg" style="font-size:12px;color:var(--text-3);padding:8px 0 4px;margin-bottom:4px;">
+        ${otpEnabled
+          ? '✅ OTP is active — you will receive a verification code by email each login.'
+          : '⚠️ OTP is disabled — you sign in with password only. Less secure.'}
       </div>
       <div class="setting-row" style="margin-top:10px;">
-        <div class="setting-row-info"><h5>Disable 2FA</h5><p>Remove all authenticator app factors from your account.</p></div>
-        <button class="btn-ghost" style="border-color:var(--red);color:var(--red);" onclick="disable2FA()">Disable 2FA</button>
-      </div>
-      <div class="setting-row" style="margin-top:10px;">
-        <div class="setting-row-info"><h5>Password Reset</h5><p>Send a reset link to your email.</p></div>
+        <div class="setting-row-info"><h5>Password Reset</h5><p>Send a password reset link to your email.</p></div>
         <button class="btn-ghost" onclick="sendPasswordReset()">Send Email</button>
       </div>`;
+
   } else if (section === 'notifications') {
-    c.innerHTML = `<h3>Notifications</h3><p class="desc">Configure reminder preferences.</p>
+    c.innerHTML = `<h3>Notifications</h3><p class="desc">Configure how you get reminded about meetings.</p>
       <div class="setting-row">
-        <div class="setting-row-info"><h5>Browser Notifications</h5><p>Get in-browser alerts before meetings.</p></div>
-        <label class="toggle"><input type="checkbox" id="browserToggle" ${s.notifications.browser?'checked':''}><div class="toggle-track"></div></label>
+        <div class="setting-row-info"><h5>Browser Notifications</h5><p>Pop-up alerts in your browser before meetings start.</p></div>
+        <label class="toggle"><input type="checkbox" id="browserToggle" ${s.notifications?.browser?'checked':''}><div class="toggle-track"></div></label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-row-info"><h5>Email Reminders</h5><p>Receive an email reminder before each meeting.</p></div>
+        <label class="toggle"><input type="checkbox" id="emailNotifToggle" ${s.notifications?.emailReminders?'checked':''}><div class="toggle-track"></div></label>
       </div>
       <div class="range-wrap">
-        <div class="range-header"><span>Reminder Time Before Meeting</span><span id="reminderVal">${s.notifications.reminderMinutes} min</span></div>
-        <input type="range" id="reminderSlider" min="5" max="60" value="${s.notifications.reminderMinutes}" oninput="document.getElementById('reminderVal').innerText=this.value+' min'">
+        <div class="range-header"><span>Reminder Time Before Meeting</span><span id="reminderVal">${s.notifications?.reminderMinutes||15} min</span></div>
+        <input type="range" id="reminderSlider" min="5" max="60" value="${s.notifications?.reminderMinutes||15}" oninput="document.getElementById('reminderVal').innerText=this.value+' min'">
       </div>
       <button class="btn-accent" onclick="saveNotifications()">Save Notifications</button>`;
+
   } else if (section === 'defaults') {
     c.innerHTML = `<h3>Meeting Defaults</h3><p class="desc">Set default options for new meetings.</p>
       <div class="form-group mb-4"><label class="form-label">Default Platform</label>
         <select class="form-control" id="defPlatform">
-          <option value="meet" ${s.defaults.platform==='meet'?'selected':''}>Google Meet</option>
-          <option value="zoom" ${s.defaults.platform==='zoom'?'selected':''}>Zoom</option>
-          <option value="jitsi" ${s.defaults.platform==='jitsi'?'selected':''}>Jitsi</option>
+          <option value="meet" ${s.defaults?.platform==='meet'?'selected':''}>Google Meet</option>
+          <option value="zoom" ${s.defaults?.platform==='zoom'?'selected':''}>Zoom</option>
+          <option value="jitsi" ${s.defaults?.platform==='jitsi'?'selected':''}>Jitsi</option>
         </select></div>
       <div class="form-group mb-4"><label class="form-label">Default Duration</label>
         <select class="form-control" id="defDuration">
-          <option value="15" ${s.defaults.duration===15?'selected':''}>15 Minutes</option>
-          <option value="30" ${s.defaults.duration===30?'selected':''}>30 Minutes</option>
-          <option value="60" ${s.defaults.duration===60?'selected':''}>1 Hour</option>
+          <option value="15" ${s.defaults?.duration===15?'selected':''}>15 Minutes</option>
+          <option value="30" ${s.defaults?.duration===30?'selected':''}>30 Minutes</option>
+          <option value="60" ${s.defaults?.duration===60?'selected':''}>1 Hour</option>
         </select></div>
       <button class="btn-accent" onclick="saveDefaults()">Save Defaults</button>`;
+
   } else if (section === 'availability') {
-    c.innerHTML = `<h3>Availability</h3><p class="desc">Define your working hours.</p>
+    c.innerHTML = `<h3>Availability</h3><p class="desc">Define your working hours and meeting limits.</p>
       <div class="form-grid">
-        <div class="form-group"><label class="form-label">Start Time</label><input class="form-control" type="time" id="availStart" value="${s.availability.start}"></div>
-        <div class="form-group"><label class="form-label">End Time</label><input class="form-control" type="time" id="availEnd" value="${s.availability.end}"></div>
-        <div class="form-group"><label class="form-label">Buffer (min)</label><input class="form-control" type="number" id="availBuffer" value="${s.availability.buffer}" min="0" max="60"></div>
-        <div class="form-group"><label class="form-label">Max / Day</label><input class="form-control" type="number" id="availMax" value="${s.availability.maxPerDay}" min="1" max="20"></div>
+        <div class="form-group"><label class="form-label">Start Time</label><input class="form-control" type="time" id="availStart" value="${s.availability?.start||'09:00'}"></div>
+        <div class="form-group"><label class="form-label">End Time</label><input class="form-control" type="time" id="availEnd" value="${s.availability?.end||'17:00'}"></div>
+        <div class="form-group"><label class="form-label">Buffer Between Meetings (min)</label><input class="form-control" type="number" id="availBuffer" value="${s.availability?.buffer||0}" min="0" max="60"></div>
+        <div class="form-group"><label class="form-label">Max Meetings / Day</label><input class="form-control" type="number" id="availMax" value="${s.availability?.maxPerDay||10}" min="1" max="20"></div>
       </div>
       <button class="btn-accent mt-4" onclick="saveAvailability()">Save Availability</button>`;
+
   } else if (section === 'appearance') {
     const themes = [
       { id:'',             label:'Default',   bg:'linear-gradient(135deg,#0a0a0f,#7c6cf8)' },
@@ -762,15 +789,40 @@ function loadSettings(section, btn) {
       { id:'theme-forest', label:'Forest',    bg:'linear-gradient(135deg,#070f0a,#22d3a0)' },
       { id:'theme-rose',   label:'Rose',      bg:'linear-gradient(135deg,#110a0f,#f472b6)' },
     ];
-    c.innerHTML = `<h3>Appearance</h3><p class="desc">Customize your workspace look.</p>
+    c.innerHTML = `<h3>Appearance</h3><p class="desc">Customize your workspace look and feel.</p>
       <div class="theme-grid">
-        ${themes.map(t=>`<div class="theme-swatch ${s.appearance.theme===t.id?'active':''}" style="background:${t.bg}" onclick="changeTheme('${t.id}',this)"><span>${t.label}</span></div>`).join('')}
+        ${themes.map(t=>`<div class="theme-swatch ${s.appearance?.theme===t.id?'active':''}" style="background:${t.bg}" onclick="changeTheme('${t.id}',this)"><span>${t.label}</span></div>`).join('')}
       </div>`;
+
   } else if (section === 'data') {
-    c.innerHTML = `<h3>Data & Privacy</h3><p class="desc">Manage your stored data.</p>
-      <div class="setting-row"><div class="setting-row-info"><h5>Export All Data</h5><p>Download meetings as JSON.</p></div><button class="btn-ghost" onclick="exportData()">Export</button></div>
-      <div class="setting-row"><div class="setting-row-info"><h5>Delete All Meetings</h5><p>Permanently remove all meetings.</p></div><button class="btn-ghost" style="border-color:var(--red);color:var(--red);" onclick="clearAllData()">Delete All</button></div>`;
+    c.innerHTML = `<h3>Data & Privacy</h3><p class="desc">Manage your stored data and account.</p>
+      <div class="setting-row">
+        <div class="setting-row-info"><h5>Export All Data</h5><p>Download all your meetings as a JSON file.</p></div>
+        <button class="btn-ghost" onclick="exportData()">⬇ Export</button>
+      </div>
+      <div class="setting-row">
+        <div class="setting-row-info"><h5>Delete All Meetings</h5><p>Permanently remove all one-time and recurring meetings.</p></div>
+        <button class="btn-ghost" style="border-color:var(--red);color:var(--red);" onclick="clearAllData()">🗑 Delete All</button>
+      </div>
+      <div class="setting-row" style="margin-top:8px;">
+        <div class="setting-row-info"><h5>Sign Out</h5><p>Log out of your MeetSync account on this device.</p></div>
+        <button class="btn-ghost" style="border-color:var(--red);color:var(--red);" onclick="logout()">↩ Sign Out</button>
+      </div>`;
   }
+}
+
+function toggleOTPSetting(enabled) {
+  const s = getSettings();
+  if (!s.security) s.security = {};
+  s.security.otpEnabled = enabled;
+  saveSettings(s);
+  const msg = document.getElementById('otpStatusMsg');
+  if (msg) {
+    msg.innerText = enabled
+      ? '✅ OTP is active — you will receive a verification code by email each login.'
+      : '⚠️ OTP is disabled — you sign in with password only. Less secure.';
+  }
+  toast(enabled ? 'Email OTP verification enabled' : 'Email OTP verification disabled', enabled ? 'success' : 'info');
 }
 
 async function saveProfile() {
@@ -798,7 +850,9 @@ async function sendPasswordReset() {
 
 function saveNotifications() {
   const s = getSettings();
+  if (!s.notifications) s.notifications = {};
   s.notifications.browser         = document.getElementById('browserToggle').checked;
+  s.notifications.emailReminders  = document.getElementById('emailNotifToggle').checked;
   s.notifications.reminderMinutes = parseInt(document.getElementById('reminderSlider').value);
   saveSettings(s);
   if (s.notifications.browser) requestBrowserNotificationPermission();
@@ -965,7 +1019,8 @@ function toggleSidebar() {
   localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
 }
 
-window.toggleSidebar = toggleSidebar;
+window.toggleOTPSetting    = toggleOTPSetting;
+window.toggleSidebar       = toggleSidebar;
 window.toggleMode          = toggleMode;
 window.handlePasswordReset = handlePasswordReset;
 window.verifyOTP           = verifyOTP;

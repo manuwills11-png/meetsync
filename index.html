@@ -77,26 +77,26 @@
         <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
       </div>
       <span class="nav-label">Workspace</span>
-      <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard',this)">
+      <button class="nav-btn active" id="nav-dashboard" data-label="Dashboard" onclick="showPage('dashboard',this)">
         <div class="nav-icon">🏠</div>Dashboard
         <span class="badge" id="todayBadge">0</span>
       </button>
-      <button class="nav-btn" id="nav-meetings" onclick="showPage('meetings',this)">
+      <button class="nav-btn" id="nav-meetings" data-label="All Meetings" onclick="showPage('meetings',this)">
         <div class="nav-icon">📋</div>All Meetings
       </button>
-      <button class="nav-btn" id="nav-analytics" onclick="showPage('analytics',this)">
+      <button class="nav-btn" id="nav-analytics" data-label="Analytics" onclick="showPage('analytics',this)">
         <div class="nav-icon">📊</div>Analytics
       </button>
       <span class="nav-label">Tools</span>
-      <button class="nav-btn" id="nav-calendarPage" onclick="showPage('calendarPage',this)">
+      <button class="nav-btn" id="nav-calendarPage" data-label="Calendar" onclick="showPage('calendarPage',this)">
         <div class="nav-icon">📅</div>Calendar
       </button>
-      <button class="nav-btn" id="nav-settings" onclick="showPage('settings',this)">
+      <button class="nav-btn" id="nav-settings" data-label="Settings" onclick="showPage('settings',this)">
         <div class="nav-icon">⚙️</div>Settings
       </button>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-user">
-        <div class="user-avatar" id="sidebarAvatar">?</div>
+        <div class="user-avatar" id="sidebarAvatar" data-name="Account">?</div>
         <div class="user-info">
           <div class="user-name" id="sidebarName">Guest</div>
           <div class="user-role">Member</div>
@@ -342,6 +342,9 @@
       <button class="ai-send" onclick="processAI()">➤</button>
     </div>
   </div>
+
+  <!-- MOBILE LOGOUT BUTTON (shown only on mobile, outside sidebar) -->
+  <button id="mobileLogoutBtn" onclick="logout()" title="Sign out">↩</button>
 
   <div class="toast-container" id="toastContainer"></div>
 
