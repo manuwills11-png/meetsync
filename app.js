@@ -1021,6 +1021,7 @@ function toggleSidebar() {
 
 window.toggleOTPSetting    = toggleOTPSetting;
 window.toggleSidebar       = toggleSidebar;
+window.handleAuth          = handleAuth;
 window.toggleMode          = toggleMode;
 window.handlePasswordReset = handlePasswordReset;
 window.verifyOTP           = verifyOTP;
