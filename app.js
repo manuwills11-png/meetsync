@@ -343,11 +343,17 @@ async function loginSuccess(user) {
   _currentUser = user;
 
   // Show shell immediately with email prefix — will update below
-  const emailPrefix = user.email.split('@')[0];
+  const displayName =
+  user.user_metadata?.display_name ||
+  getSettings().profile?.username ||
+  user.email.split('@')[0];
+
+document.getElementById('sidebarName').innerText = displayName;
+document.getElementById('sidebarAvatar').innerText =
+  displayName.charAt(0).toUpperCase();
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('otpScreen').style.display   = 'none';
   document.querySelector('.shell').style.display       = 'flex';
-  document.getElementById('sidebarName').innerText     = emailPrefix;
   document.getElementById('sidebarAvatar').innerText   = emailPrefix.charAt(0).toUpperCase();
 
   // Pull latest settings from Supabase (overwrites local if remote exists)
@@ -684,7 +690,14 @@ function updateClock() {
   const greet  = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night';
   const emojis = { morning:'☀️', afternoon:'🌤️', evening:'🌙', night:'⭐' };
   const tkey   = h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night';
-  const name   = _currentUser ? _currentUser.email.split('@')[0] : '';
+  let name = '';
+
+if (_currentUser) {
+  name =
+    _currentUser.user_metadata?.display_name ||
+    getSettings().profile?.username ||
+    _currentUser.email.split('@')[0];
+}
   document.getElementById('liveClock').innerText    = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   document.getElementById('liveDate').innerText     = now.toLocaleDateString();
   document.getElementById('clockBig').innerText     = now.toLocaleTimeString();
@@ -925,7 +938,16 @@ async function saveProfile() {
   const newName = document.getElementById('sUsername').value.trim();
   const newPass = document.getElementById('sPass').value;
 
-  s.profile.username = newName;
+ s.profile.username = newName;
+
+if (newName) {
+  const { error } = await sb.auth.updateUser({
+    data: { display_name: newName }
+  });
+  if (error) {
+    toast('Could not update display name in auth: ' + error.message, 'error');
+  }
+}
 
   if (newPass) {
     if (newPass.length < 6) { toast('Password must be at least 6 characters.', 'error'); return; }
