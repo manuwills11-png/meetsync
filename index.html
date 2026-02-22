@@ -76,39 +76,56 @@
 
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
+
+      <!-- Logo row -->
       <div class="sidebar-logo">
         <div class="sidebar-logo-icon">⚡</div>
         <span class="sidebar-logo-text">MeetSync</span>
         <span class="sidebar-logo-badge">PRO</span>
-        <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
       </div>
+
+      <!-- Toggle button — sits just below logo, always visible -->
+      <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <span class="collapse-arrow">‹</span>
+      </button>
+
       <span class="nav-label">Workspace</span>
       <button class="nav-btn active" id="nav-dashboard" data-label="Dashboard" onclick="showPage('dashboard',this)">
-        <div class="nav-icon">🏠</div>Dashboard
+        <div class="nav-icon">🏠</div>
+        <span class="nav-text">Dashboard</span>
         <span class="badge" id="todayBadge">0</span>
       </button>
       <button class="nav-btn" id="nav-meetings" data-label="All Meetings" onclick="showPage('meetings',this)">
-        <div class="nav-icon">📋</div>All Meetings
+        <div class="nav-icon">📋</div>
+        <span class="nav-text">All Meetings</span>
       </button>
       <button class="nav-btn" id="nav-analytics" data-label="Analytics" onclick="showPage('analytics',this)">
-        <div class="nav-icon">📊</div>Analytics
+        <div class="nav-icon">📊</div>
+        <span class="nav-text">Analytics</span>
       </button>
+
       <span class="nav-label">Tools</span>
       <button class="nav-btn" id="nav-calendarPage" data-label="Calendar" onclick="showPage('calendarPage',this)">
-        <div class="nav-icon">📅</div>Calendar
+        <div class="nav-icon">📅</div>
+        <span class="nav-text">Calendar</span>
       </button>
       <button class="nav-btn" id="nav-settings" data-label="Settings" onclick="showPage('settings',this)">
-        <div class="nav-icon">⚙️</div>Settings
+        <div class="nav-icon">⚙️</div>
+        <span class="nav-text">Settings</span>
       </button>
+
       <div class="sidebar-spacer"></div>
+
+      <!-- User row -->
       <div class="sidebar-user">
-        <div class="user-avatar" id="sidebarAvatar" data-name="Account">?</div>
+        <div class="user-avatar" id="sidebarAvatar">?</div>
         <div class="user-info">
           <div class="user-name" id="sidebarName">Guest</div>
           <div class="user-role">Member</div>
         </div>
         <button class="logout-btn" onclick="logout()" title="Sign out">↩</button>
       </div>
+
     </aside>
 
     <!-- MAIN CONTENT -->
