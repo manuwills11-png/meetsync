@@ -77,17 +77,15 @@
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
 
-      <!-- Logo row -->
+      <!-- Logo row — icon | MeetSync PRO | ‹ toggle — all on one line -->
       <div class="sidebar-logo">
         <div class="sidebar-logo-icon">⚡</div>
         <span class="sidebar-logo-text">MeetSync</span>
         <span class="sidebar-logo-badge">PRO</span>
+        <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+          <span class="collapse-arrow">‹</span>
+        </button>
       </div>
-
-      <!-- Toggle button — sits just below logo, always visible -->
-      <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">
-        <span class="collapse-arrow">‹</span>
-      </button>
 
       <span class="nav-label">Workspace</span>
       <button class="nav-btn active" id="nav-dashboard" data-label="Dashboard" onclick="showPage('dashboard',this)">

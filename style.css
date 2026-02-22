@@ -321,34 +321,37 @@ body::before {
   z-index: 50;
 }
 
-/* ── Logo row ── */
+/* ── Logo row  (⚡ icon | MeetSync | PRO | ‹ toggle — all on one line) ── */
 .sidebar-logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 16px 14px;
+  padding: 0 14px;
+  height: 60px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   overflow: hidden;
 }
 .sidebar-logo-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
   background: var(--accent);
-  border-radius: 9px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 15px;
   flex-shrink: 0;
 }
 .sidebar-logo-text {
   font-family: var(--font-d);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 15px;
   letter-spacing: -.3px;
   white-space: nowrap;
-  transition: opacity .2s var(--ease);
+  flex: 1;
+  overflow: hidden;
 }
 .sidebar-logo-badge {
   font-size: 8px;
@@ -360,27 +363,25 @@ body::before {
   padding: 2px 5px;
   letter-spacing: .8px;
   white-space: nowrap;
-  margin-left: auto;
   flex-shrink: 0;
-  transition: opacity .2s var(--ease);
 }
 
-/* ── Collapse toggle button ── */
+/* Toggle button — rightmost item in the logo row */
 .sidebar-collapse-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: 10px auto 6px;
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--text-3);
-  font-size: 15px;
+  font-size: 13px;
   cursor: pointer;
-  transition: all .22s var(--ease);
-  flex-shrink: 0;
+  transition: background .18s, border-color .18s, color .18s;
 }
 .sidebar-collapse-btn:hover {
   background: var(--accent-dim);
@@ -400,10 +401,9 @@ body::before {
   letter-spacing: 1.4px;
   text-transform: uppercase;
   color: var(--text-3);
-  padding: 10px 16px 4px;
+  padding: 12px 16px 4px;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity .2s var(--ease), max-height .2s var(--ease);
 }
 
 /* ── Nav buttons ── */
@@ -411,21 +411,20 @@ body::before {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
-  padding: 9px 12px;
+  padding: 8px 10px;
+  margin: 1px 8px;
+  width: calc(100% - 16px);
   background: transparent;
   border: none;
   border-radius: 8px;
   color: var(--text-2);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background .18s var(--ease), color .18s var(--ease);
+  transition: background .18s, color .18s;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  margin: 1px 8px;
-  width: calc(100% - 16px);
   position: relative;
 }
 .nav-btn .nav-icon {
@@ -437,15 +436,15 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
-  transition: background .18s var(--ease);
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: background .18s;
 }
 .nav-text {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity .2s var(--ease);
 }
 .nav-btn .badge {
   background: var(--accent);
@@ -457,12 +456,8 @@ body::before {
   min-width: 18px;
   text-align: center;
   flex-shrink: 0;
-  transition: opacity .2s var(--ease);
 }
-.nav-btn:hover {
-  background: rgba(255,255,255,0.05);
-  color: var(--text);
-}
+.nav-btn:hover { background: rgba(255,255,255,0.05); color: var(--text); }
 .nav-btn:hover .nav-icon { background: var(--accent-dim); }
 .nav-btn.active { background: var(--accent-dim); color: var(--accent); }
 .nav-btn.active .nav-icon { background: var(--accent); color: #fff; }
@@ -479,9 +474,9 @@ body::before {
   flex-shrink: 0;
 }
 .user-avatar {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
   background: linear-gradient(135deg, var(--accent), var(--green));
   border-radius: 50%;
   display: flex;
@@ -489,21 +484,11 @@ body::before {
   justify-content: center;
   font-family: var(--font-d);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
+  flex-shrink: 0;
 }
-.user-info {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  transition: opacity .2s var(--ease);
-}
-.user-name {
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.user-info { flex: 1; min-width: 0; overflow: hidden; }
+.user-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .user-role { font-size: 11px; color: var(--text-3); }
 .logout-btn {
   background: none;
@@ -511,7 +496,7 @@ body::before {
   color: var(--text-3);
   cursor: pointer;
   padding: 5px;
-  font-size: 15px;
+  font-size: 14px;
   transition: color .18s, background .18s;
   border-radius: 6px;
   flex-shrink: 0;
@@ -519,75 +504,48 @@ body::before {
 .logout-btn:hover { color: var(--red); background: var(--red-dim); }
 
 /* ================================================================
-   COLLAPSED SIDEBAR  (width → 64px, icon rail)
-   Strategy: hide text via opacity+width, keep icons centered
+   COLLAPSED  (64 px icon rail)
 ================================================================ */
-.sidebar.collapsed {
-  width: 64px;
-  min-width: 64px;
-}
+.sidebar.collapsed { width: 64px; min-width: 64px; }
 
-/* Rotate arrow to point right */
-.sidebar.collapsed .collapse-arrow {
-  transform: rotate(180deg);
-}
+/* Arrow flips direction */
+.sidebar.collapsed .collapse-arrow { transform: rotate(180deg); }
 
-/* Hide logo text + badge */
-.sidebar.collapsed .sidebar-logo-text,
-.sidebar.collapsed .sidebar-logo-badge {
-  opacity: 0;
-  width: 0;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-}
-/* Center logo icon */
+/* Logo row: hide text + badge, keep ⚡ + ‹ side by side centered */
 .sidebar.collapsed .sidebar-logo {
   justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
-  gap: 0;
+  gap: 8px;
+  padding: 0 8px;
 }
-.sidebar.collapsed .sidebar-logo-icon { margin: 0 auto; }
+.sidebar.collapsed .sidebar-logo-text,
+.sidebar.collapsed .sidebar-logo-badge { display: none; }
+/* Button loses auto-right-margin so it sits right next to icon */
+.sidebar.collapsed .sidebar-collapse-btn { margin-left: 0; }
 
-/* Hide section labels */
+/* Section labels vanish */
 .sidebar.collapsed .nav-label {
-  opacity: 0;
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
   overflow: hidden;
 }
 
-/* Center icon in nav button */
+/* Nav buttons: center icon, hide text */
 .sidebar.collapsed .nav-btn {
   justify-content: center;
-  padding: 9px 0;
-  margin: 1px 8px;
-  width: calc(100% - 16px);
-  overflow: visible; /* allow tooltip to overflow */
+  padding: 8px 0;
+  overflow: visible;         /* tooltip escapes sidebar */
 }
-/* Hide text and badge */
 .sidebar.collapsed .nav-text,
-.sidebar.collapsed .nav-btn .badge {
-  opacity: 0;
-  width: 0;
-  overflow: hidden;
-}
-/* Icon stays, just re-centered */
-.sidebar.collapsed .nav-btn .nav-icon {
-  margin: 0;
-}
+.sidebar.collapsed .nav-btn .badge { display: none; }
 
-/* ── Tooltips ── show on hover when collapsed */
+/* Tooltip via ::before with position:fixed — escapes overflow:hidden */
 .sidebar.collapsed .nav-btn::before {
   content: attr(data-label);
   position: fixed;
-  left: 72px;               /* just past the 64px sidebar edge */
-  top: auto;                /* vertically aligned via JS-free trick */
-  transform: translateY(-50%) translateY(15px);
+  left: 72px;
   background: var(--surface2);
-  border: 1px solid var(--border-hov);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 12px;
@@ -602,26 +560,17 @@ body::before {
 }
 .sidebar.collapsed .nav-btn:hover::before { opacity: 1; }
 
-/* ── Collapsed user section ── */
+/* User section collapsed */
 .sidebar.collapsed .sidebar-user {
   justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
   flex-direction: column;
+  padding: 12px 8px;
   gap: 6px;
 }
-.sidebar.collapsed .user-info {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
+.sidebar.collapsed .user-info { display: none; }
 .sidebar.collapsed .logout-btn {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface2);
