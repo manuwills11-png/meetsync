@@ -23,9 +23,9 @@ const getMeetings  = () => _meetings;
 const getRecurring = () => _recurring;
 
 /* ============================================================
-   SETTINGS — Supabase-synced (cross-device)
-   Stored in Supabase table: user_settings (user_id, settings jsonb)
-   Also cached in localStorage for instant load
+   SETTINGS — Supabase-synced across all devices
+   Flow: save locally → upsert to Supabase → show ✓
+         on login → fetch from Supabase → overwrite local → apply
 ============================================================ */
 const DEFAULT_SETTINGS = {
   profile:       { username: '', email: '' },
@@ -36,44 +36,44 @@ const DEFAULT_SETTINGS = {
   security:      { otpEnabled: true }
 };
 
+function mergeWithDefaults(raw) {
+  return {
+    profile:       { ...DEFAULT_SETTINGS.profile,       ...(raw?.profile       || {}) },
+    notifications: { ...DEFAULT_SETTINGS.notifications, ...(raw?.notifications || {}) },
+    defaults:      { ...DEFAULT_SETTINGS.defaults,      ...(raw?.defaults      || {}) },
+    availability:  { ...DEFAULT_SETTINGS.availability,  ...(raw?.availability  || {}) },
+    appearance:    { ...DEFAULT_SETTINGS.appearance,    ...(raw?.appearance    || {}) },
+    security:      { ...DEFAULT_SETTINGS.security,      ...(raw?.security      || {}) },
+  };
+}
+
 function getSettings() {
-  const cached = localStorage.getItem('settings');
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached);
-      // Merge with defaults to ensure all keys exist
-      return {
-        profile:       { ...DEFAULT_SETTINGS.profile,       ...(parsed.profile       || {}) },
-        notifications: { ...DEFAULT_SETTINGS.notifications, ...(parsed.notifications || {}) },
-        defaults:      { ...DEFAULT_SETTINGS.defaults,      ...(parsed.defaults      || {}) },
-        availability:  { ...DEFAULT_SETTINGS.availability,  ...(parsed.availability  || {}) },
-        appearance:    { ...DEFAULT_SETTINGS.appearance,    ...(parsed.appearance    || {}) },
-        security:      { ...DEFAULT_SETTINGS.security,      ...(parsed.security      || {}) },
-      };
-    } catch { return { ...DEFAULT_SETTINGS }; }
-  }
-  return { ...DEFAULT_SETTINGS };
+  try {
+    const raw = JSON.parse(localStorage.getItem('settings') || 'null');
+    return mergeWithDefaults(raw);
+  } catch { return mergeWithDefaults(null); }
 }
 
-function saveSettings(s) {
-  // Always save to localStorage immediately (instant, works offline)
+/* Save locally first (instant), then push to Supabase */
+async function saveSettings(s, toastMsg = null) {
   localStorage.setItem('settings', JSON.stringify(s));
-  // Then sync to Supabase in background (cross-device)
-  syncSettingsToSupabase(s);
-}
+  applySettingsToUI(s);
 
-async function syncSettingsToSupabase(s) {
   if (!_currentUser) return;
   try {
-    await sb.from('user_settings').upsert(
+    const { error } = await sb.from('user_settings').upsert(
       { user_id: _currentUser.id, settings: s, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
+    if (error) throw error;
+    if (toastMsg) toast(toastMsg, 'success');
   } catch (e) {
-    console.warn('Settings sync failed (will retry next save):', e.message);
+    console.warn('Settings sync failed:', e.message);
+    if (toastMsg) toast(toastMsg + ' (saved locally)', 'success');
   }
 }
 
+/* Pull from Supabase and overwrite local — called on every login */
 async function loadSettingsFromSupabase() {
   if (!_currentUser) return;
   try {
@@ -82,21 +82,28 @@ async function loadSettingsFromSupabase() {
       .select('settings')
       .eq('user_id', _currentUser.id)
       .single();
-    if (error || !data) return; // no remote settings yet, use local
-    const merged = {
-      profile:       { ...DEFAULT_SETTINGS.profile,       ...(data.settings.profile       || {}) },
-      notifications: { ...DEFAULT_SETTINGS.notifications, ...(data.settings.notifications || {}) },
-      defaults:      { ...DEFAULT_SETTINGS.defaults,      ...(data.settings.defaults      || {}) },
-      availability:  { ...DEFAULT_SETTINGS.availability,  ...(data.settings.availability  || {}) },
-      appearance:    { ...DEFAULT_SETTINGS.appearance,    ...(data.settings.appearance    || {}) },
-      security:      { ...DEFAULT_SETTINGS.security,      ...(data.settings.security      || {}) },
-    };
+
+    if (error || !data?.settings) return; // first-time user, no remote settings yet
+
+    const merged = mergeWithDefaults(data.settings);
     localStorage.setItem('settings', JSON.stringify(merged));
-    // Apply theme immediately
-    document.body.className = merged.appearance.theme || '';
+    return merged;
   } catch (e) {
     console.warn('Could not load settings from Supabase:', e.message);
   }
+}
+
+/* Apply loaded settings to the live UI (sidebar name, theme, etc.) */
+function applySettingsToUI(s) {
+  // Theme
+  document.body.className = s.appearance?.theme || '';
+
+  // Sidebar display name — prefer saved username, fall back to email prefix
+  const name = s.profile?.username || (_currentUser?.email?.split('@')[0] || '');
+  const nameEl   = document.getElementById('sidebarName');
+  const avatarEl = document.getElementById('sidebarAvatar');
+  if (nameEl   && name) nameEl.innerText   = name;
+  if (avatarEl && name) avatarEl.innerText = name.charAt(0).toUpperCase();
 }
 
 /* ============================================================
@@ -334,17 +341,27 @@ async function resendOTP() {
 ============================================================ */
 async function loginSuccess(user) {
   _currentUser = user;
-  const displayName = user.email.split('@')[0];
+
+  // Show shell immediately with email prefix — will update below
+  const emailPrefix = user.email.split('@')[0];
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('otpScreen').style.display   = 'none';
   document.querySelector('.shell').style.display       = 'flex';
-  document.getElementById('sidebarName').innerText     = displayName;
-  document.getElementById('sidebarAvatar').innerText   = displayName.charAt(0).toUpperCase();
+  document.getElementById('sidebarName').innerText     = emailPrefix;
+  document.getElementById('sidebarAvatar').innerText   = emailPrefix.charAt(0).toUpperCase();
 
-  // Load cross-device settings from Supabase first, then seed email
+  // Pull latest settings from Supabase (overwrites local if remote exists)
   await loadSettingsFromSupabase();
+
+  // Seed email into profile if first login
   const s = getSettings();
-  if (!s.profile.email) { s.profile.email = user.email; saveSettings(s); }
+  if (!s.profile.email) {
+    s.profile.email = user.email;
+    await saveSettings(s);
+  }
+
+  // Apply everything — theme, username in sidebar, etc.
+  applySettingsToUI(s);
 
   await fetchAllData();
   initApp();
@@ -903,34 +920,22 @@ function loadSettings(section, btn) {
   }
 }
 
-function toggleOTPSetting(enabled) {
-  const s = getSettings();
-  if (!s.security) s.security = {};
-  s.security.otpEnabled = enabled;
-  saveSettings(s);
-  const msg = document.getElementById('otpStatusMsg');
-  if (msg) {
-    msg.innerText = enabled
-      ? '✅ OTP is active — you will receive a verification code by email each login.'
-      : '⚠️ OTP is disabled — you sign in with password only. Less secure.';
-  }
-  toast(enabled ? 'Email OTP verification enabled' : 'Email OTP verification disabled', enabled ? 'success' : 'info');
-}
-
 async function saveProfile() {
   const s = getSettings();
-  s.profile.username = document.getElementById('sUsername').value.trim();
+  const newName = document.getElementById('sUsername').value.trim();
   const newPass = document.getElementById('sPass').value;
+
+  s.profile.username = newName;
+
   if (newPass) {
     if (newPass.length < 6) { toast('Password must be at least 6 characters.', 'error'); return; }
     const { error } = await sb.auth.updateUser({ password: newPass });
     if (error) { toast('Password update failed: ' + error.message, 'error'); return; }
-    toast('Password updated!', 'success');
     document.getElementById('sPass').value = '';
+    toast('Password updated!', 'success');
   }
-  saveSettings(s);
-  document.getElementById('sidebarName').innerText = s.profile.username || (_currentUser ? _currentUser.email.split('@')[0] : '');
-  toast('Profile saved!', 'success');
+
+  await saveSettings(s, 'Profile saved!');
 }
 
 async function sendPasswordReset() {
@@ -940,41 +945,52 @@ async function sendPasswordReset() {
   else       toast('Password reset email sent!', 'success');
 }
 
-function saveNotifications() {
+async function saveNotifications() {
   const s = getSettings();
   if (!s.notifications) s.notifications = {};
   s.notifications.browser         = document.getElementById('browserToggle').checked;
   s.notifications.emailReminders  = document.getElementById('emailNotifToggle').checked;
   s.notifications.reminderMinutes = parseInt(document.getElementById('reminderSlider').value);
-  saveSettings(s);
   if (s.notifications.browser) requestBrowserNotificationPermission();
-  toast('Notifications saved!', 'success');
+  await saveSettings(s, 'Notifications saved!');
 }
 
-function saveDefaults() {
+async function saveDefaults() {
   const s = getSettings();
   s.defaults.platform = document.getElementById('defPlatform').value;
   s.defaults.duration = parseInt(document.getElementById('defDuration').value);
-  saveSettings(s);
-  toast('Defaults saved!', 'success');
+  await saveSettings(s, 'Defaults saved!');
 }
 
-function saveAvailability() {
+async function saveAvailability() {
   const s = getSettings();
   s.availability.start     = document.getElementById('availStart').value;
   s.availability.end       = document.getElementById('availEnd').value;
   s.availability.buffer    = parseInt(document.getElementById('availBuffer').value);
   s.availability.maxPerDay = parseInt(document.getElementById('availMax').value);
-  saveSettings(s);
-  toast('Availability saved!', 'success');
+  await saveSettings(s, 'Availability saved!');
 }
 
-function changeTheme(theme, el) {
+async function changeTheme(theme, el) {
   document.body.className = theme;
   document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
   if (el) el.classList.add('active');
-  const s = getSettings(); s.appearance.theme = theme; saveSettings(s);
-  toast('Theme applied!', 'success');
+  const s = getSettings();
+  s.appearance.theme = theme;
+  await saveSettings(s, 'Theme applied!');
+}
+
+async function toggleOTPSetting(enabled) {
+  const s = getSettings();
+  if (!s.security) s.security = {};
+  s.security.otpEnabled = enabled;
+  const msg = document.getElementById('otpStatusMsg');
+  if (msg) {
+    msg.innerText = enabled
+      ? '✅ OTP is active — you will receive a verification code by email each login.'
+      : '⚠️ OTP is disabled — you sign in with password only. Less secure.';
+  }
+  await saveSettings(s, enabled ? 'OTP verification enabled' : 'OTP verification disabled');
 }
 
 function exportData() {
@@ -1134,15 +1150,25 @@ function refreshAll() {
 
 function initApp() {
   const s = getSettings();
-  document.body.className = s.appearance.theme || '';
-  // Restore sidebar state
+  applySettingsToUI(s);
+
+  // Restore sidebar collapsed state
   if (localStorage.getItem('sidebarCollapsed') === 'true') {
     document.getElementById('sidebar')?.classList.add('collapsed');
   }
+
   refreshAll();
   updateClock();
   loadSettings('profile', document.querySelector('.settings-tab'));
 }
+
+// Re-sync settings when user returns to this tab (picks up changes from other devices)
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && _currentUser) {
+    await loadSettingsFromSupabase();
+    applySettingsToUI(getSettings());
+  }
+});
 
 /* ============================================================
    EXPOSE ALL FUNCTIONS TO GLOBAL SCOPE
