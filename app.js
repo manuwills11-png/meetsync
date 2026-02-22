@@ -432,14 +432,29 @@ async function disable2FA() {
 ============================================================ */
 async function fetchAllData() {
   if (!_currentUser) return;
+
+  console.log("Current user ID:", _currentUser.id);
+
   const [{ data: m, error: e1 }, { data: r, error: e2 }] = await Promise.all([
-    sb.from('meetings').select('*').eq('user_id', _currentUser.id).order('date').order('time'),
-    sb.from('recurring').select('*').eq('user_id', _currentUser.id).order('created_at')
+    sb.from('meetings')
+      .select('*')
+      .eq('user_id', _currentUser.id)
+      .order('date')
+      .order('time'),
+
+    sb.from('recurring')
+      .select('*')
+      .eq('user_id', _currentUser.id)
+      .order('created_at')
   ]);
+
+  console.log("Meetings fetched:", m);
+
   if (e1) console.error('Meetings fetch error:', e1.message);
-  else    _meetings  = m || [];
+  else _meetings = m || [];
+
   if (e2) console.error('Recurring fetch error:', e2.message);
-  else    _recurring = r || [];
+  else _recurring = r || [];
 }
 
 /* ============================================================
@@ -1243,7 +1258,7 @@ window.clearAllData        = clearAllData;
 window.toggleAI            = toggleAI;
 window.askAI               = askAI;
 window.processAI           = processAI;
-
+window.sb = sb;
 /* ============================================================
    BOOTSTRAP
 ============================================================ */
