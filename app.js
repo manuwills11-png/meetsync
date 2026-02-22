@@ -340,38 +340,51 @@ async function resendOTP() {
    SESSION
 ============================================================ */
 async function loginSuccess(user) {
-  _currentUser = user;
+  try {
+    _currentUser = user;
 
-  // Show shell immediately with email prefix — will update below
-  const displayName =
-  user.user_metadata?.display_name ||
-  getSettings().profile?.username ||
-  user.email.split('@')[0];
+    // Resolve display name properly
+    const displayName =
+      user.user_metadata?.display_name ||
+      getSettings().profile?.username ||
+      (user.email ? user.email.split('@')[0] : 'User');
 
-document.getElementById('sidebarName').innerText = displayName;
-document.getElementById('sidebarAvatar').innerText =
-  displayName.charAt(0).toUpperCase();
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('otpScreen').style.display   = 'none';
-  document.querySelector('.shell').style.display       = 'flex';
-  document.getElementById('sidebarAvatar').innerText   = emailPrefix.charAt(0).toUpperCase();
+    // Set sidebar UI
+    const nameEl = document.getElementById('sidebarName');
+    const avatarEl = document.getElementById('sidebarAvatar');
 
-  // Pull latest settings from Supabase (overwrites local if remote exists)
-  await loadSettingsFromSupabase();
+    if (nameEl) nameEl.innerText = displayName;
+    if (avatarEl) avatarEl.innerText = displayName.charAt(0).toUpperCase();
 
-  // Seed email into profile if first login
-  const s = getSettings();
-  if (!s.profile.email) {
-    s.profile.email = user.email;
-    await saveSettings(s);
+    // Hide auth screens, show app shell
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('otpScreen').style.display   = 'none';
+    document.querySelector('.shell').style.display       = 'flex';
+
+    // Pull latest settings from Supabase
+    await loadSettingsFromSupabase();
+
+    // Seed email into profile on first login
+    const s = getSettings();
+    if (!s.profile.email) {
+      s.profile.email = user.email;
+      await saveSettings(s);
+    }
+
+    // Apply theme + settings to UI
+    applySettingsToUI(s);
+
+    // 🔥 IMPORTANT: fetch data AFTER user is fully set
+    await fetchAllData();
+
+    // Initialize app UI
+    initApp();
+
+    hideLoading();
+
+  } catch (err) {
+    console.error("Login success error:", err);
   }
-
-  // Apply everything — theme, username in sidebar, etc.
-  applySettingsToUI(s);
-
-  await fetchAllData();
-  initApp();
-  hideLoading();
 }
 
 async function logout() {
@@ -1258,7 +1271,7 @@ window.clearAllData        = clearAllData;
 window.toggleAI            = toggleAI;
 window.askAI               = askAI;
 window.processAI           = processAI;
-window.sb = sb;
+
 /* ============================================================
    BOOTSTRAP
 ============================================================ */
