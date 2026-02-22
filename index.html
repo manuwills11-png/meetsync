@@ -4,6 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MeetSync — Smart Meeting Hub</title>
+
+  <!-- PWA manifest & theme -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#7c6cf8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MeetSync">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="description" content="Your smart workspace for managing meetings and staying in sync.">`
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -368,6 +377,17 @@
 
   <!-- Single script tag — no bridge needed, app.js exposes functions to window directly -->
   <script type="module" src="app.js"></script>
+
+  <!-- PWA: Register service worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(r => console.log('MeetSync SW ready:', r.scope))
+          .catch(e => console.warn('SW failed:', e));
+      });
+    }
+  </script>
 
 </body>
 </html>
