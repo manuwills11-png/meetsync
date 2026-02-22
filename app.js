@@ -23,16 +23,81 @@ const getMeetings  = () => _meetings;
 const getRecurring = () => _recurring;
 
 /* ============================================================
-   SETTINGS
+   SETTINGS — Supabase-synced (cross-device)
+   Stored in Supabase table: user_settings (user_id, settings jsonb)
+   Also cached in localStorage for instant load
 ============================================================ */
-const getSettings = () => JSON.parse(localStorage.getItem('settings')) || {
+const DEFAULT_SETTINGS = {
   profile:       { username: '', email: '' },
-  notifications: { browser: false, reminderMinutes: 15 },
+  notifications: { browser: false, emailReminders: false, reminderMinutes: 15 },
   defaults:      { platform: 'meet', duration: 30 },
   availability:  { start: '09:00', end: '17:00', buffer: 0, maxPerDay: 10 },
-  appearance:    { theme: '' }
+  appearance:    { theme: '' },
+  security:      { otpEnabled: true }
 };
-const saveSettings = s => localStorage.setItem('settings', JSON.stringify(s));
+
+function getSettings() {
+  const cached = localStorage.getItem('settings');
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      // Merge with defaults to ensure all keys exist
+      return {
+        profile:       { ...DEFAULT_SETTINGS.profile,       ...(parsed.profile       || {}) },
+        notifications: { ...DEFAULT_SETTINGS.notifications, ...(parsed.notifications || {}) },
+        defaults:      { ...DEFAULT_SETTINGS.defaults,      ...(parsed.defaults      || {}) },
+        availability:  { ...DEFAULT_SETTINGS.availability,  ...(parsed.availability  || {}) },
+        appearance:    { ...DEFAULT_SETTINGS.appearance,    ...(parsed.appearance    || {}) },
+        security:      { ...DEFAULT_SETTINGS.security,      ...(parsed.security      || {}) },
+      };
+    } catch { return { ...DEFAULT_SETTINGS }; }
+  }
+  return { ...DEFAULT_SETTINGS };
+}
+
+function saveSettings(s) {
+  // Always save to localStorage immediately (instant, works offline)
+  localStorage.setItem('settings', JSON.stringify(s));
+  // Then sync to Supabase in background (cross-device)
+  syncSettingsToSupabase(s);
+}
+
+async function syncSettingsToSupabase(s) {
+  if (!_currentUser) return;
+  try {
+    await sb.from('user_settings').upsert(
+      { user_id: _currentUser.id, settings: s, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  } catch (e) {
+    console.warn('Settings sync failed (will retry next save):', e.message);
+  }
+}
+
+async function loadSettingsFromSupabase() {
+  if (!_currentUser) return;
+  try {
+    const { data, error } = await sb
+      .from('user_settings')
+      .select('settings')
+      .eq('user_id', _currentUser.id)
+      .single();
+    if (error || !data) return; // no remote settings yet, use local
+    const merged = {
+      profile:       { ...DEFAULT_SETTINGS.profile,       ...(data.settings.profile       || {}) },
+      notifications: { ...DEFAULT_SETTINGS.notifications, ...(data.settings.notifications || {}) },
+      defaults:      { ...DEFAULT_SETTINGS.defaults,      ...(data.settings.defaults      || {}) },
+      availability:  { ...DEFAULT_SETTINGS.availability,  ...(data.settings.availability  || {}) },
+      appearance:    { ...DEFAULT_SETTINGS.appearance,    ...(data.settings.appearance    || {}) },
+      security:      { ...DEFAULT_SETTINGS.security,      ...(data.settings.security      || {}) },
+    };
+    localStorage.setItem('settings', JSON.stringify(merged));
+    // Apply theme immediately
+    document.body.className = merged.appearance.theme || '';
+  } catch (e) {
+    console.warn('Could not load settings from Supabase:', e.message);
+  }
+}
 
 /* ============================================================
    UTILITIES
@@ -66,6 +131,14 @@ function localToday() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+function showLoading(text = 'Please wait…') {
+  document.getElementById('loadingText').innerText = text;
+  document.getElementById('loadingOverlay').classList.add('show');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('show');
+}
+
 function setAuthLoading(loading) {
   const btn    = document.getElementById('authBtn');
   btn.disabled = loading;
@@ -90,7 +163,11 @@ function toggleMode() {
   document.getElementById('authMessage').className     = 'auth-message';
 }
 
+let _authInProgress = false;
+
 async function handleAuth() {
+  if (_authInProgress) return; // prevent double-tap / multiple OTPs
+
   const email    = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value.trim();
   const confirm  = document.getElementById('confirmPassword').value.trim();
@@ -102,23 +179,25 @@ async function handleAuth() {
     return;
   }
 
+  _authInProgress = true;
   setAuthLoading(true);
+  showLoading(_isSignup ? 'Creating your account…' : 'Signing in…');
 
   if (_isSignup) {
     if (password !== confirm) {
       msg.innerText = 'Passwords do not match.';
       msg.className = 'auth-message msg-error';
-      setAuthLoading(false);
+      setAuthLoading(false); hideLoading(); _authInProgress = false;
       return;
     }
     if (password.length < 6) {
       msg.innerText = 'Password must be at least 6 characters.';
       msg.className = 'auth-message msg-error';
-      setAuthLoading(false);
+      setAuthLoading(false); hideLoading(); _authInProgress = false;
       return;
     }
     const { error } = await sb.auth.signUp({ email, password });
-    setAuthLoading(false);
+    setAuthLoading(false); hideLoading(); _authInProgress = false;
     if (error) { msg.innerText = error.message; msg.className = 'auth-message msg-error'; return; }
     msg.innerText = '✅ Account created! Sign in below.';
     msg.className = 'auth-message msg-success';
@@ -126,13 +205,12 @@ async function handleAuth() {
     return;
   }
 
-  // Check if user has OTP enabled (default: ON)
-  const otpEnabled = (getSettings().security?.otpEnabled) !== false;
+  // Check if user has OTP enabled (default: ON) — read from Supabase settings
+  const localOtpEnabled = (getSettings().security?.otpEnabled) !== false;
 
-  if (!otpEnabled) {
-    // OTP off — sign in directly with password, no email code needed
+  if (!localOtpEnabled) {
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    setAuthLoading(false);
+    setAuthLoading(false); hideLoading(); _authInProgress = false;
     if (error) {
       msg.innerText = 'Invalid email or password.';
       msg.className = 'auth-message msg-error';
@@ -142,26 +220,28 @@ async function handleAuth() {
     return;
   }
 
-  // Mark OTP flow as pending BEFORE signing in, so onAuthStateChange ignores the SIGNED_IN event
+  // OTP flow — mark pending so onAuthStateChange ignores the SIGNED_IN event
   window._pendingEmail = email;
 
-  // Sign in — verify password first
+  showLoading('Verifying password…');
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  setAuthLoading(false);
 
   if (error) {
     window._pendingEmail = null;
     msg.innerText = 'Invalid email or password.';
     msg.className = 'auth-message msg-error';
+    setAuthLoading(false); hideLoading(); _authInProgress = false;
     return;
   }
 
-  // Sign out, then send OTP for 2FA
+  showLoading('Sending verification code…');
   await sb.auth.signOut();
   const { error: otpError } = await sb.auth.signInWithOtp({
     email,
     options: { shouldCreateUser: false }
   });
+
+  setAuthLoading(false); hideLoading(); _authInProgress = false;
 
   if (otpError) {
     window._pendingEmail = null;
@@ -260,10 +340,15 @@ async function loginSuccess(user) {
   document.querySelector('.shell').style.display       = 'flex';
   document.getElementById('sidebarName').innerText     = displayName;
   document.getElementById('sidebarAvatar').innerText   = displayName.charAt(0).toUpperCase();
+
+  // Load cross-device settings from Supabase first, then seed email
+  await loadSettingsFromSupabase();
   const s = getSettings();
   if (!s.profile.email) { s.profile.email = user.email; saveSettings(s); }
+
   await fetchAllData();
   initApp();
+  hideLoading();
 }
 
 async function logout() {
@@ -742,18 +827,25 @@ function loadSettings(section, btn) {
   } else if (section === 'notifications') {
     c.innerHTML = `<h3>Notifications</h3><p class="desc">Configure how you get reminded about meetings.</p>
       <div class="setting-row">
-        <div class="setting-row-info"><h5>Browser Notifications</h5><p>Pop-up alerts in your browser before meetings start.</p></div>
+        <div class="setting-row-info">
+          <h5>Browser Notifications</h5>
+          <p>Pop-up alerts outside the browser tab when meetings are about to start.</p>
+        </div>
         <label class="toggle"><input type="checkbox" id="browserToggle" ${s.notifications?.browser?'checked':''}><div class="toggle-track"></div></label>
       </div>
       <div class="setting-row">
-        <div class="setting-row-info"><h5>Email Reminders</h5><p>Receive an email reminder before each meeting.</p></div>
+        <div class="setting-row-info">
+          <h5>In-App Sound Alert</h5>
+          <p>Play an audio beep and show a banner inside MeetSync before meetings start. Keep this tab open for reminders to fire.</p>
+        </div>
         <label class="toggle"><input type="checkbox" id="emailNotifToggle" ${s.notifications?.emailReminders?'checked':''}><div class="toggle-track"></div></label>
       </div>
       <div class="range-wrap">
-        <div class="range-header"><span>Reminder Time Before Meeting</span><span id="reminderVal">${s.notifications?.reminderMinutes||15} min</span></div>
+        <div class="range-header"><span>Remind me this many minutes before</span><span id="reminderVal">${s.notifications?.reminderMinutes||15} min</span></div>
         <input type="range" id="reminderSlider" min="5" max="60" value="${s.notifications?.reminderMinutes||15}" oninput="document.getElementById('reminderVal').innerText=this.value+' min'">
       </div>
-      <button class="btn-accent" onclick="saveNotifications()">Save Notifications</button>`;
+      <button class="btn-accent" onclick="saveNotifications()">Save Notifications</button>
+      <p style="margin-top:14px;font-size:11px;color:var(--text-3);">💡 To receive reminders, keep this tab open. Browser notifications work even when the tab is in the background.</p>`;
 
   } else if (section === 'defaults') {
     c.innerHTML = `<h3>Meeting Defaults</h3><p class="desc">Set default options for new meetings.</p>
@@ -903,7 +995,7 @@ async function clearAllData() {
 }
 
 /* ============================================================
-   NOTIFICATIONS
+   NOTIFICATIONS — Meeting reminders
 ============================================================ */
 async function requestBrowserNotificationPermission() {
   if (!('Notification' in window)) { toast('Browser does not support notifications.', 'error'); return; }
@@ -913,34 +1005,78 @@ async function requestBrowserNotificationPermission() {
 }
 
 function sendBrowserNotif(title, body) {
-  if (Notification.permission === 'granted') new Notification(title, { body });
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '⚡' });
+  }
 }
 
-setInterval(() => {
+// Track which reminders we've already fired this session (key = "subject|date|time")
+const _firedReminders = new Set();
+
+function checkMeetingReminders() {
   if (!_currentUser) return;
-  const now         = new Date();
-  const currentDay  = now.toLocaleString('default', { weekday:'short' });
-  const currentTime = now.toTimeString().slice(0,5);
-  const offset      = parseInt(getSettings().notifications.reminderMinutes) || 15;
-  getRecurring().forEach(r => {
-    if (!r.days.includes(currentDay)) return;
-    const [h,m] = r.time.split(':').map(Number);
-    const rem = new Date(); rem.setHours(h, m-offset, 0, 0);
-    if (currentTime === rem.toTimeString().slice(0,5)) {
-      toast(`🔔 "${r.subject}" starts in ${offset} min`, 'info');
-      sendBrowserNotif('Upcoming Meeting', `"${r.subject}" starts in ${offset} minutes`);
+  const s = getSettings();
+  const offset = parseInt(s.notifications?.reminderMinutes) || 15;
+  const browserOn = s.notifications?.browser;
+
+  const now = new Date();
+  const currentDay = now.toLocaleString('default', { weekday: 'short' });
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  function fireReminder(subject, meetingTimeStr, key) {
+    if (_firedReminders.has(key)) return;
+    _firedReminders.add(key);
+
+    // Big in-app toast
+    toast(`🔔 <strong>${subject}</strong> starts in ${offset} min`, 'info');
+
+    // Browser notification
+    if (browserOn) {
+      sendBrowserNotif('⚡ MeetSync Reminder', `"${subject}" starts in ${offset} minutes`);
     }
-  });
+
+    // Play a subtle beep using Web Audio
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.15, 0.30].forEach(delay => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = 660;
+        gain.gain.setValueAtTime(0.18, ctx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.25);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.25);
+      });
+    } catch (_) { /* audio not supported */ }
+  }
+
+  // Check one-time meetings
   getMeetings().forEach(m => {
     if (m.date !== localToday()) return;
-    const [h,min] = m.time.split(':').map(Number);
-    const rem = new Date(); rem.setHours(h, min-offset, 0, 0);
-    if (currentTime === rem.toTimeString().slice(0,5)) {
-      toast(`🔔 "${m.subject}" starts in ${offset} min`, 'info');
-      sendBrowserNotif('Upcoming Meeting', `"${m.subject}" starts in ${offset} minutes`);
+    const [h, min] = m.time.split(':').map(Number);
+    const meetMins = h * 60 + min;
+    const reminderMins = meetMins - offset;
+    // Fire if we're within the current minute of the reminder time
+    if (nowMins === reminderMins) {
+      fireReminder(m.subject, m.time, `${m.subject}|${m.date}|${m.time}`);
     }
   });
-}, 60000);
+
+  // Check recurring meetings
+  getRecurring().forEach(r => {
+    if (!r.days.includes(currentDay)) return;
+    const [h, min] = r.time.split(':').map(Number);
+    const meetMins = h * 60 + min;
+    const reminderMins = meetMins - offset;
+    if (nowMins === reminderMins) {
+      fireReminder(r.subject, r.time, `${r.subject}|${currentDay}|${r.time}`);
+    }
+  });
+}
+
+// Check every 30 seconds for tighter accuracy (within the right minute)
+setInterval(checkMeetingReminders, 30000);
 
 /* ============================================================
    MODALS
@@ -1022,6 +1158,8 @@ function toggleSidebar() {
 window.toggleOTPSetting    = toggleOTPSetting;
 window.toggleSidebar       = toggleSidebar;
 window.handleAuth          = handleAuth;
+window.showLoading         = showLoading;
+window.hideLoading         = hideLoading;
 window.toggleMode          = toggleMode;
 window.handlePasswordReset = handlePasswordReset;
 window.verifyOTP           = verifyOTP;

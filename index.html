@@ -65,6 +65,12 @@
     </div>
   </div>
 
+  <!-- LOADING OVERLAY -->
+  <div id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">Signing in…</div>
+  </div>
+
   <!-- MAIN APP SHELL -->
   <div class="shell">
 
@@ -342,9 +348,6 @@
       <button class="ai-send" onclick="processAI()">➤</button>
     </div>
   </div>
-
-  <!-- MOBILE LOGOUT BUTTON (shown only on mobile, outside sidebar) -->
-  <button id="mobileLogoutBtn" onclick="logout()" title="Sign out">↩</button>
 
   <div class="toast-container" id="toastContainer"></div>
 

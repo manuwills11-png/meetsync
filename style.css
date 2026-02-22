@@ -258,8 +258,38 @@ body::before {
 .msg-success { color: var(--green); }
 
 /* ============================================================
-   LAYOUT
+   LOADING OVERLAY
 ============================================================ */
+#loadingOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,15,0.92);
+  backdrop-filter: blur(12px);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  gap: 20px;
+}
+#loadingOverlay.show { display: flex; }
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.loading-text {
+  font-size: var(--fs-base);
+  color: var(--text-2);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+
 .shell {
   display: flex;
   width: 100%;
@@ -318,27 +348,21 @@ body::before {
   padding-left: 8px;
   padding-right: 8px;
 }
+/* Keep button inside sidebar — no negative right positioning that could clip */
 .sidebar.collapsed .sidebar-collapse-btn {
   transform: rotate(180deg);
-  position: absolute;
-  right: -12px;
-  top: 22px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 2px 0 10px rgba(0,0,0,.4);
-  z-index: 100;
   margin-left: 0;
-}
-.sidebar.collapsed .sidebar-collapse-btn:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  margin: 0 auto;
+  position: static; /* stay in flow, centered */
 }
 .sidebar.collapsed .sidebar-logo {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
-  gap: 0;
+  gap: 6px;
+  flex-direction: column;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
 }
 .sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-logo-badge { display: none; }
@@ -1401,65 +1425,6 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
 @keyframes fadeOut { from { opacity: 1; }                             to { opacity: 0; pointer-events: none; } }
 @keyframes pulse   { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
-/* Sidebar collapse toggle button */
-.sidebar-collapse-btn {
-  margin-left: auto;
-  width:  clamp(22px, 2.8vw, 26px);
-  height: clamp(22px, 2.8vw, 26px);
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-3);
-  font-size: clamp(13px, 1.6vw, 16px);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: .22s var(--ease);
-  flex-shrink: 0;
-  line-height: 1;
-}
-.sidebar-collapse-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
-
-/* Collapsed sidebar — only the toggle strip is visible */
-.sidebar {
-  transition: width .25s var(--ease);
-  overflow: hidden;
-}
-.sidebar.collapsed {
-  width: 36px;
-}
-.sidebar.collapsed .sidebar-collapse-btn {
-  transform: rotate(180deg);
-  margin-left: 0;
-  margin-right: 0;
-}
-/* When collapsed, only show the logo row (which contains the toggle btn) */
-.sidebar.collapsed .sidebar-logo {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
-  gap: 0;
-  border-bottom: none;
-  margin-bottom: 0;
-}
-.sidebar.collapsed .sidebar-logo-icon,
-.sidebar.collapsed .sidebar-logo-text,
-.sidebar.collapsed .sidebar-logo-badge,
-.sidebar.collapsed .nav-label,
-.sidebar.collapsed .nav-btn,
-.sidebar.collapsed .sidebar-spacer,
-.sidebar.collapsed .sidebar-user {
-  display: none;
-}
-/* The toggle button itself needs to be reachable even when collapsed */
-.sidebar.collapsed .sidebar-logo {
-  padding: 12px 0;
-  display: flex;
-  justify-content: center;
-  margin-bottom: 0;
-}
-
 /* ============================================================
    RESPONSIVE — TABLET (portrait, < 900px)
    Sidebar collapses to icon-only strip
@@ -1537,41 +1502,8 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
   /* No tooltip on mobile */
   .nav-btn::after { display: none !important; }
 
-  /* Mobile logout button — shown as last tab */
-  #mobileLogoutBtn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    flex: 1;
-    padding: clamp(6px, 1.2vh, 10px) clamp(6px, 2vw, 12px);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-3);
-    font-size: clamp(9px, 1.8vw, 11px);
-    cursor: pointer;
-    transition: .22s var(--ease);
-  }
-  #mobileLogoutBtn::before {
-    content: '↩';
-    width:  clamp(26px, 5vw, 32px);
-    height: clamp(26px, 5vw, 32px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--surface2);
-    border-radius: clamp(6px, .9vw, 8px);
-    font-size: clamp(14px, 3vw, 16px);
-    margin-bottom: 2px;
-  }
-  #mobileLogoutBtn:hover, #mobileLogoutBtn:active {
-    color: var(--red);
-  }
-  #mobileLogoutBtn:hover::before, #mobileLogoutBtn:active::before {
-    background: var(--red-dim);
-  }
+  /* Mobile logout — hidden on mobile (use Settings → Data & Privacy to sign out) */
+  #mobileLogoutBtn { display: none !important; }
 
   /* AI trigger — sits above bottom nav */
   #aiTrigger {
