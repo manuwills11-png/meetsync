@@ -4,15 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MeetSync — Smart Meeting Hub</title>
-
-  <!-- PWA manifest & theme -->
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#7c6cf8">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="MeetSync">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <meta name="description" content="Your smart workspace for managing meetings and staying in sync.">`
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -351,25 +342,34 @@
     </div>
   </div>
 
-  <!-- AI ASSISTANT -->
+  <!-- AI ASSISTANT TRIGGER -->
   <button id="aiTrigger" onclick="toggleAI()" title="AI Assistant">🤖</button>
   <div id="aiWindow">
     <div class="ai-header">
-      <div class="ai-header-left"><div class="ai-dot"></div><h4>AI Assistant</h4></div>
+      <div class="ai-header-left">
+        <div class="ai-dot"></div>
+        <div>
+          <h4>MeetSync AI</h4>
+          <span class="ai-subtitle">Smart assistant </span>
+        </div>
+      </div>
       <button class="ai-close" onclick="toggleAI()">✕</button>
     </div>
     <div class="ai-body" id="aiBody">
-      <div class="ai-msg bot">Hello! I'm your MeetSync assistant. Ask me about your meetings 👋</div>
+      <div class="ai-msg bot">Hey! 👋 I'm your smart meeting assistant. I can <strong>find meetings, schedule new ones, join calls, navigate the app,</strong> and more — just talk naturally!</div>
     </div>
-    <div class="ai-suggestions">
-      <span class="ai-chip" onclick="askAI('meetings today')">Today's meetings</span>
-      <span class="ai-chip" onclick="askAI('total meetings')">Total count</span>
-      <span class="ai-chip" onclick="askAI('next meeting')">Next meeting</span>
-      <span class="ai-chip" onclick="askAI('recurring meetings')">Recurring</span>
+    <div class="ai-suggestions" id="aiSuggestions">
+      <span class="ai-chip" onclick="askAI('what meetings do I have today')">📅 Today</span>
+      <span class="ai-chip" onclick="askAI('when is my next meeting')">⏭ Next meeting</span>
+      <span class="ai-chip" onclick="askAI('schedule a new meeting')">➕ Schedule</span>
+      <span class="ai-chip" onclick="askAI('give me a summary')">📊 Summary</span>
+      <span class="ai-chip" onclick="askAI('open the calendar')">📆 Calendar</span>
+      <span class="ai-chip" onclick="askAI('what can you do')">❓ Help</span>
     </div>
     <div class="ai-input-area">
-      <input type="text" id="aiInput" placeholder="Ask anything..." onkeydown="if(event.key==='Enter') processAI()">
-      <button class="ai-send" onclick="processAI()">➤</button>
+      <input type="text" id="aiInput" placeholder="Ask me anything about your meetings…"
+        onkeydown="if(event.key==='Enter') processAI()">
+      <button class="ai-send" onclick="processAI()" title="Send">➤</button>
     </div>
   </div>
 
@@ -377,17 +377,6 @@
 
   <!-- Single script tag — no bridge needed, app.js exposes functions to window directly -->
   <script type="module" src="app.js"></script>
-
-  <!-- PWA: Register service worker -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
-          .then(r => console.log('MeetSync SW ready:', r.scope))
-          .catch(e => console.warn('SW failed:', e));
-      });
-    }
-  </script>
 
 </body>
 </html>
