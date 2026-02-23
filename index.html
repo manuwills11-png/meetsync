@@ -345,6 +345,7 @@
   <!-- AI ASSISTANT TRIGGER -->
   <button id="aiTrigger" onclick="toggleAI()" title="AI Assistant">🤖</button>
   <div id="aiWindow">
+    <div class="ai-resize-handle" id="aiResizeHandle"></div>
     <div class="ai-header">
       <div class="ai-header-left">
         <div class="ai-dot"></div>
@@ -353,21 +354,30 @@
           <span class="ai-subtitle">Smart assistant </span>
         </div>
       </div>
-      <button class="ai-close" onclick="toggleAI()">✕</button>
+      <div class="ai-header-actions">
+        <button class="ai-header-btn" onclick="aiClearChat()" title="Clear chat">🗑</button>
+        <button class="ai-close" onclick="toggleAI()">✕</button>
+      </div>
     </div>
     <div class="ai-body" id="aiBody">
-      <div class="ai-msg bot">Hey! 👋 I'm your smart meeting assistant. I can <strong>find meetings, schedule new ones, join calls, navigate the app,</strong> and more — just talk naturally!</div>
+      <div class="ai-msg bot">
+        <div class="ai-msg-content">Hey! 👋 I can <strong>schedule meetings, find free slots, detect conflicts, reschedule, join calls, filter by platform</strong> and control the app. Just talk naturally — I remember context too!</div>
+        <div class="ai-msg-footer"><span class="ai-ts"></span><button class="ai-copy-btn" title="Copy" onclick="aiCopyMsg(this)">⎘</button></div>
+      </div>
     </div>
     <div class="ai-suggestions" id="aiSuggestions">
       <span class="ai-chip" onclick="askAI('what meetings do I have today')">📅 Today</span>
-      <span class="ai-chip" onclick="askAI('when is my next meeting')">⏭ Next meeting</span>
+      <span class="ai-chip" onclick="askAI('when am I free today')">🕒 Free slots</span>
+      <span class="ai-chip" onclick="askAI('when is my next meeting')">⏭ Next</span>
       <span class="ai-chip" onclick="askAI('schedule a new meeting')">➕ Schedule</span>
+      <span class="ai-chip" onclick="askAI('show all zoom meetings')">🔍 Filter</span>
       <span class="ai-chip" onclick="askAI('give me a summary')">📊 Summary</span>
-      <span class="ai-chip" onclick="askAI('open the calendar')">📆 Calendar</span>
-      <span class="ai-chip" onclick="askAI('what can you do')">❓ Help</span>
+      <span class="ai-chip" onclick="askAI('show my past meetings')">📋 Past</span>
+      <span class="ai-chip ai-chip-danger" onclick="aiClearChat()">🗑 Clear</span>
     </div>
     <div class="ai-input-area">
-      <input type="text" id="aiInput" placeholder="Ask me anything about your meetings…"
+      <button class="ai-voice-btn" id="aiVoiceBtn" onclick="aiVoiceInput()" title="Voice input">🎤</button>
+      <input type="text" id="aiInput" placeholder="Ask anything about your meetings…"
         onkeydown="if(event.key==='Enter') processAI()">
       <button class="ai-send" onclick="processAI()" title="Send">➤</button>
     </div>

@@ -1124,11 +1124,18 @@ document.querySelectorAll('.modal-backdrop').forEach(m => {
 });
 
 /* ============================================================
-   AI ASSISTANT — Smart Local NLP Engine
-   Understands natural language, controls the page, no API needed
+   AI ASSISTANT — Smart Local NLP Engine v2
+   + Conversation memory, voice input, conflict detection,
+     free slot finder, reschedule, filter by platform,
+     past meetings, timestamps, copy button, clear chat
 ============================================================ */
 
-// ── Open / close ──────────────────────────────────────────────
+// Conversation memory
+let _aiHistory    = [];
+let _aiLastIntent = null;
+let _aiLastResult = null;
+
+// ── Open / close
 function toggleAI() {
   const win = document.getElementById('aiWindow');
   win.classList.toggle('open');
@@ -1138,32 +1145,68 @@ function toggleAI() {
   }
 }
 
-// ── Chip shortcut ─────────────────────────────────────────────
+// ── Clear chat
+function aiClearChat() {
+  _aiHistory = []; _aiLastIntent = null; _aiLastResult = null;
+  document.getElementById('aiBody').innerHTML =
+    '<div class="ai-msg bot">Chat cleared! 👋 What do you need?</div>';
+}
+
+// ── Chip shortcut
 function askAI(text) {
   document.getElementById('aiInput').value = text;
   processAI();
 }
 
-// ── Typing indicator ──────────────────────────────────────────
+// ── Voice input
+let _aiListening = false;
+function aiVoiceInput() {
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    toast('Voice input not supported. Try Chrome.', 'error'); return;
+  }
+  const btn = document.getElementById('aiVoiceBtn');
+  const SR  = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const rec = new SR();
+  rec.lang = 'en-US'; rec.interimResults = false;
+  if (_aiListening) { rec.stop(); return; }
+  _aiListening = true;
+  btn.classList.add('listening');
+  rec.start();
+  rec.onresult = e => {
+    document.getElementById('aiInput').value = e.results[0][0].transcript;
+    processAI();
+  };
+  rec.onend = () => { _aiListening = false; btn.classList.remove('listening'); };
+  rec.onerror = () => { _aiListening = false; btn.classList.remove('listening'); toast('Could not hear. Try again.', 'error'); };
+}
+
+// ── Typing indicator
 function aiShowTyping() {
   const body = document.getElementById('aiBody');
   const el = document.createElement('div');
-  el.className = 'ai-msg bot ai-typing';
-  el.id = 'aiTyping';
+  el.className = 'ai-msg bot ai-typing'; el.id = 'aiTyping';
   el.innerHTML = '<span></span><span></span><span></span>';
-  body.appendChild(el);
-  body.scrollTop = body.scrollHeight;
+  body.appendChild(el); body.scrollTop = body.scrollHeight;
 }
-function aiHideTyping() {
-  document.getElementById('aiTyping')?.remove();
+function aiHideTyping() { document.getElementById('aiTyping')?.remove(); }
+
+// ── Timestamp helper
+function aiTimestamp() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Append a bot message with optional action buttons ─────────
+// ── Append bot message with actions + timestamp + copy button
 function aiBotMsg(html, actions = []) {
   const body = document.getElementById('aiBody');
   const el   = document.createElement('div');
   el.className = 'ai-msg bot';
-  el.innerHTML = html;
+
+  const content = document.createElement('div');
+  content.className = 'ai-msg-content';
+  content.innerHTML = html;
+  el.appendChild(content);
+
+  // Action buttons
   if (actions.length) {
     const bar = document.createElement('div');
     bar.className = 'ai-action-bar';
@@ -1176,46 +1219,71 @@ function aiBotMsg(html, actions = []) {
     });
     el.appendChild(bar);
   }
+
+  // Footer: timestamp + copy
+  const footer = document.createElement('div');
+  footer.className = 'ai-msg-footer';
+  footer.innerHTML = `
+    <span class="ai-ts">${aiTimestamp()}</span>
+    <button class="ai-copy-btn" title="Copy" onclick="aiCopyMsg(this)">⎘</button>
+  `;
+  el.appendChild(footer);
+
   body.appendChild(el);
   body.scrollTop = body.scrollHeight;
+
+  // Save to history
+  _aiHistory.push({ role: 'bot', text: html.replace(/<[^>]+>/g, ''), time: Date.now() });
 }
 
-// ── Dynamic suggestions based on context ─────────────────────
+// ── Copy message text
+function aiCopyMsg(btn) {
+  const text = btn.closest('.ai-msg').querySelector('.ai-msg-content').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = '⎘', 1500);
+  });
+}
+
+// ── Dynamic suggestion chips
 function aiUpdateSuggestions() {
   const meetings  = getMeetings();
   const recurring = getRecurring();
   const today     = localToday();
-  const todayDay  = new Date().toLocaleString('default', { weekday:'short' });
-  const todayCount = meetings.filter(m=>m.date===today).length +
-                     recurring.filter(r=>r.days.includes(todayDay)).length;
-  const nextUp = meetings.filter(m=>m.date>=today).sort((a,b)=>a.date.localeCompare(b.date))[0];
-
+  const todayDay  = new Date().toLocaleString('default', { weekday: 'short' });
+  const todayCount = meetings.filter(m => m.date === today).length +
+                     recurring.filter(r => r.days.includes(todayDay)).length;
+  const nextUp = meetings.filter(m => m.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
   const chips = [
-    { label: `📅 Today (${todayCount})`,  text: 'what meetings do I have today' },
-    { label: '⏭ Next meeting',            text: 'when is my next meeting' },
-    { label: '🔄 Recurring',              text: 'show my recurring meetings' },
-    { label: '📊 Summary',                text: 'give me a summary of all my meetings' },
-    { label: '➕ New meeting',             text: 'schedule a new meeting' },
-    { label: '🗑 Delete a meeting',        text: 'delete a meeting' },
-    { label: '🔍 Find meeting',            text: 'find meeting' },
-    { label: '📆 Go to calendar',         text: 'open the calendar' },
-    { label: '⚙️ Settings',               text: 'open settings' },
+    { label: `📅 Today (${todayCount})`,    text: 'what meetings do I have today' },
+    { label: '⏭ Next meeting',             text: 'when is my next meeting' },
+    { label: '🔄 Recurring',               text: 'show my recurring meetings' },
+    { label: '📊 Summary',                 text: 'give me a summary' },
+    { label: '🕒 Free slots today',        text: 'when am I free today' },
+    { label: '📅 This week',               text: 'meetings this week' },
+    { label: '🔍 Filter by Zoom',          text: 'show all zoom meetings' },
+    { label: '➕ Schedule',                text: 'schedule a new meeting' },
+    { label: '🗑 Delete',                  text: 'delete a meeting' },
+    { label: '📆 Calendar',               text: 'open the calendar' },
+    { label: '⚙️ Settings',              text: 'open settings' },
     { label: nextUp ? `▶ Join ${nextUp.subject}` : '▶ Join next', text: 'join my next meeting' },
+    { label: '📋 Past meetings',          text: 'show my past meetings' },
+    { label: '📈 Busiest day',            text: 'what is my busiest day' },
+    { label: '🗑 Clear chat',             text: '__clear__' },
   ];
   const wrap = document.getElementById('aiSuggestions');
   if (!wrap) return;
   wrap.innerHTML = chips.map(c =>
-    `<span class="ai-chip" onclick="askAI('${c.text}')">${c.label}</span>`
+    c.text === '__clear__'
+      ? `<span class="ai-chip ai-chip-danger" onclick="aiClearChat()">${c.label}</span>`
+      : `<span class="ai-chip" onclick="askAI(${JSON.stringify(c.text)})">${c.label}</span>`
   ).join('');
 }
 
-// ── NLP helpers ───────────────────────────────────────────────
-function nlpHas(input, ...words) {
-  return words.some(w => input.includes(w));
-}
+// ── NLP helpers
+function nlpHas(input, ...words) { return words.some(w => input.includes(w)); }
 
 function nlpExtractTime(input) {
-  // "3pm", "3:30pm", "15:00", "3 pm", "3:30 pm"
   const m = input.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (!m) return null;
   let h = parseInt(m[1]);
@@ -1223,22 +1291,22 @@ function nlpExtractTime(input) {
   const ampm = m[3]?.toLowerCase();
   if (ampm === 'pm' && h < 12) h += 12;
   if (ampm === 'am' && h === 12) h = 0;
-  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
 
 function nlpExtractDate(input) {
   const today = new Date();
-  if (nlpHas(input, 'today'))     return localToday();
-  if (nlpHas(input, 'tomorrow'))  { const d=new Date(today); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
-  if (nlpHas(input, 'monday','mon'))    return nlpNextWeekday(1);
-  if (nlpHas(input, 'tuesday','tue'))   return nlpNextWeekday(2);
+  if (nlpHas(input, 'today'))      return localToday();
+  if (nlpHas(input, 'tomorrow'))   { const d = new Date(today); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
+  if (nlpHas(input, 'yesterday'))  { const d = new Date(today); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+  if (nlpHas(input, 'monday',   'mon')) return nlpNextWeekday(1);
+  if (nlpHas(input, 'tuesday',  'tue')) return nlpNextWeekday(2);
   if (nlpHas(input, 'wednesday','wed')) return nlpNextWeekday(3);
-  if (nlpHas(input, 'thursday','thu'))  return nlpNextWeekday(4);
-  if (nlpHas(input, 'friday','fri'))    return nlpNextWeekday(5);
-  if (nlpHas(input, 'saturday','sat'))  return nlpNextWeekday(6);
-  if (nlpHas(input, 'sunday','sun'))    return nlpNextWeekday(0);
-  // "next week"
-  if (nlpHas(input, 'next week')) { const d=new Date(today); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); }
+  if (nlpHas(input, 'thursday', 'thu')) return nlpNextWeekday(4);
+  if (nlpHas(input, 'friday',   'fri')) return nlpNextWeekday(5);
+  if (nlpHas(input, 'saturday', 'sat')) return nlpNextWeekday(6);
+  if (nlpHas(input, 'sunday',   'sun')) return nlpNextWeekday(0);
+  if (nlpHas(input, 'next week'))  { const d = new Date(today); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); }
   return null;
 }
 
@@ -1246,28 +1314,69 @@ function nlpNextWeekday(target) {
   const d = new Date();
   const diff = (target - d.getDay() + 7) % 7 || 7;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0,10);
+  return d.toISOString().slice(0, 10);
 }
 
 function nlpExtractPlatform(input) {
   if (nlpHas(input, 'zoom'))  return 'zoom';
   if (nlpHas(input, 'jitsi')) return 'jitsi';
-  return 'meet'; // default google meet
+  return 'meet';
 }
 
 function nlpFindMeeting(input) {
-  const meetings  = getMeetings();
-  const recurring = getRecurring();
-  const all = [...meetings, ...recurring];
-  // try to match any word in input to meeting subject
+  const all = [...getMeetings(), ...getRecurring()];
   return all.find(m => m.subject && input.includes(m.subject.toLowerCase())) ||
          all.find(m => m.subject && m.subject.toLowerCase().split(' ').some(w => w.length > 3 && input.includes(w)));
 }
 
-// ── Page action executor ──────────────────────────────────────
-function aiAction(action, payload = {}) {
-  switch(action) {
+// ── Check for scheduling conflicts
+function nlpCheckConflict(date, time) {
+  const meetings = getMeetings();
+  const [h, min] = time.split(':').map(Number);
+  const newStart = h * 60 + min;
+  return meetings.find(m => {
+    if (m.date !== date) return false;
+    const [mh, mm] = m.time.split(':').map(Number);
+    const mStart = mh * 60 + mm;
+    return Math.abs(newStart - mStart) < 30;
+  });
+}
 
+// ── Find free slots in a day
+function nlpFreeSlots(date) {
+  const s = getSettings();
+  const dayStart  = (s.availability?.start || '09:00').split(':').map(Number);
+  const dayEnd    = (s.availability?.end   || '17:00').split(':').map(Number);
+  const buffer    = parseInt(s.availability?.buffer || 0);
+  const startMins = dayStart[0] * 60 + dayStart[1];
+  const endMins   = dayEnd[0]   * 60 + dayEnd[1];
+
+  const dayMeetings = getMeetings()
+    .filter(m => m.date === date)
+    .map(m => { const [h, min] = m.time.split(':').map(Number); return h * 60 + min; })
+    .sort((a, b) => a - b);
+
+  const slots = [];
+  let cursor = startMins;
+  for (const mt of dayMeetings) {
+    if (mt - cursor >= 30) {
+      const sh = Math.floor(cursor / 60), sm = cursor % 60;
+      const eh = Math.floor((mt - buffer) / 60), em = (mt - buffer) % 60;
+      slots.push(`${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')} – ${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`);
+    }
+    cursor = mt + 30 + buffer;
+  }
+  if (endMins - cursor >= 30) {
+    const sh = Math.floor(cursor / 60), sm = cursor % 60;
+    const eh = Math.floor(endMins / 60), em = endMins % 60;
+    slots.push(`${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')} – ${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`);
+  }
+  return slots;
+}
+
+// ── Page action executor
+function aiAction(action, payload = {}) {
+  switch (action) {
     case 'navigate':
       toggleAI();
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1278,348 +1387,474 @@ function aiAction(action, payload = {}) {
       if (page)   page.classList.add('active');
       if (payload.page === 'analytics') updateAnalytics();
       break;
-
     case 'open-new-meeting':
       toggleAI();
       showPage('dashboard', document.getElementById('nav-dashboard'));
       setTimeout(() => openModal('meetingModal'), 300);
       break;
-
     case 'prefill-meeting':
       toggleAI();
       showPage('dashboard', document.getElementById('nav-dashboard'));
       setTimeout(() => {
         openModal('meetingModal');
-        if (payload.subject) document.getElementById('subject').value   = payload.subject;
-        if (payload.date)    document.getElementById('date').value      = payload.date;
-        if (payload.time)    document.getElementById('time').value      = payload.time;
+        if (payload.subject)  document.getElementById('subject').value  = payload.subject;
+        if (payload.date)     document.getElementById('date').value     = payload.date;
+        if (payload.time)     document.getElementById('time').value     = payload.time;
         if (payload.platform) document.getElementById('platform').value = payload.platform;
       }, 300);
       break;
-
     case 'join-meeting':
       if (payload.link) window.open(payload.link, '_blank');
       break;
-
     case 'open-settings':
       toggleAI();
       showPage('settings', document.getElementById('nav-settings'));
       if (payload.tab) setTimeout(() => loadSettings(payload.tab, document.querySelector(`.settings-tab[onclick*="${payload.tab}"]`)), 200);
       break;
-
-    case 'delete-meeting-confirm':
-      if (confirm(`Delete "${payload.subject}"?`)) {
-        deleteMeeting(payload.id);
-      }
-      break;
-
-    case 'delete-recurring-confirm':
-      if (confirm(`Delete recurring "${payload.subject}"?`)) {
-        deleteRecurring(payload.id);
-      }
-      break;
   }
 }
 
-// ── Main NLP processor ────────────────────────────────────────
+// ── Main NLP processor
 async function processAI() {
   const rawInput = document.getElementById('aiInput').value.trim();
   if (!rawInput) return;
-  const input    = rawInput.toLowerCase();
-  const body     = document.getElementById('aiBody');
+  const input = rawInput.toLowerCase();
+  const body  = document.getElementById('aiBody');
 
-  // Show user message
+  // User message with timestamp
   const userEl = document.createElement('div');
   userEl.className = 'ai-msg user';
-  userEl.textContent = rawInput;
+  userEl.innerHTML = `
+    <div class="ai-msg-content">${rawInput}</div>
+    <div class="ai-msg-footer">
+      <span class="ai-ts">${aiTimestamp()}</span>
+      <button class="ai-copy-btn" title="Copy" onclick="aiCopyMsg(this)">⎘</button>
+    </div>`;
   body.appendChild(userEl);
   body.scrollTop = body.scrollHeight;
   document.getElementById('aiInput').value = '';
 
-  // Fake thinking delay for realism
+  // Save to history
+  _aiHistory.push({ role: 'user', text: rawInput, time: Date.now() });
+
+  // Thinking delay
   aiShowTyping();
-  await new Promise(r => setTimeout(r, 420 + Math.random() * 300));
+  await new Promise(r => setTimeout(r, 380 + Math.random() * 280));
   aiHideTyping();
 
   const meetings  = getMeetings();
   const recurring = getRecurring();
   const today     = localToday();
-  const todayDay  = new Date().toLocaleString('default', { weekday:'short' });
+  const todayDay  = new Date().toLocaleString('default', { weekday: 'short' });
   const s         = getSettings();
   const userName  = s.profile?.username || _currentUser?.email?.split('@')[0] || 'there';
 
-  // ── INTENT: Greetings ──────────────────────────────────────
+  // ── Context follow-ups ("that", "it", "same one", "reschedule it")
+  if (_aiLastResult && nlpHas(input, 'that', 'it', 'same', 'this one', 'reschedule it', 'delete it', 'join it')) {
+    const m = _aiLastResult;
+    if (nlpHas(input, 'join')) {
+      aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) });
+      aiBotMsg(`Opening <strong>${m.subject}</strong>! 🚀`);
+      return;
+    }
+    if (nlpHas(input, 'delete', 'remove', 'cancel')) {
+      aiBotMsg(`Delete <strong>${m.subject}</strong>?`, [
+        { label: '🗑 Yes, delete', fn: () => {
+            m.days ? deleteRecurring(m.id) : deleteMeeting(m.id);
+            aiBotMsg(`✅ <strong>${m.subject}</strong> deleted.`);
+            _aiLastResult = null;
+        }},
+        { label: 'Cancel', fn: () => aiBotMsg('Keeping it!') }
+      ]);
+      return;
+    }
+    if (nlpHas(input, 'reschedule', 'move', 'change time')) {
+      const newDate = nlpExtractDate(input);
+      const newTime = nlpExtractTime(input);
+      if (!m.days && (newDate || newTime)) {
+        const conflict = nlpCheckConflict(newDate || m.date, newTime || m.time);
+        if (conflict && conflict.id !== m.id) {
+          aiBotMsg(`⚠️ You already have <strong>${conflict.subject}</strong> around that time. Reschedule anyway?`, [
+            { label: 'Yes, reschedule', fn: () => rescheduleViaAI(m, newDate, newTime) },
+            { label: 'Cancel', fn: () => aiBotMsg('Okay, not rescheduling.') }
+          ]);
+        } else {
+          rescheduleViaAI(m, newDate, newTime);
+        }
+      } else {
+        aiBotMsg(`Got it! I'll open the edit form for <strong>${m.subject}</strong>.`, [
+          { label: '✏️ Edit', fn: () => { toggleAI(); openEditModal(m.id); } }
+        ]);
+      }
+      return;
+    }
+  }
+
+  // ── INTENT: Greetings
   if (nlpHas(input, 'hello','hi','hey','sup','yo','good morning','good afternoon','good evening')) {
     const h = new Date().getHours();
-    const greet = h<12?'Good morning':'Good afternoon';
-    aiBotMsg(`${greet}, ${userName}! 👋 I can help you manage your meetings, schedule new ones, find info, or control the app. What do you need?`);
+    const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    aiBotMsg(`${greet}, ${userName}! 👋 I can schedule meetings, find info, join calls, and control the app. What do you need?`);
     return;
   }
 
-  // ── INTENT: Help ──────────────────────────────────────────
-  if (nlpHas(input, 'help','what can you','what do you','capabilities','commands')) {
-    aiBotMsg(`Here's what I can do:<br><br>
+  // ── INTENT: Help
+  if (nlpHas(input, 'help','what can you','capabilities','commands')) {
+    aiBotMsg(`Here's everything I can do:<br><br>
       <strong>📋 Info</strong><br>
-      • "What meetings do I have today?"<br>
+      • "Meetings today / this week / last Monday"<br>
       • "When is my next meeting?"<br>
-      • "Show all recurring meetings"<br>
-      • "How many meetings this week?"<br>
-      • "Find my standup meeting"<br><br>
+      • "Show all Zoom / Meet / Jitsi meetings"<br>
+      • "When am I free today?"<br>
+      • "What's my busiest day?"<br>
+      • "Show past meetings"<br><br>
       <strong>⚡ Actions</strong><br>
       • "Schedule a meeting tomorrow at 3pm"<br>
-      • "Open the calendar"<br>
-      • "Go to settings"<br>
+      • "Reschedule my standup to 10am"<br>
+      • "Delete my 3pm meeting"<br>
       • "Join my next meeting"<br>
-      • "Delete my standup"<br>
-      • "Show analytics"<br><br>
-      Just talk naturally — I'll figure it out!`);
+      • "Open calendar / analytics / settings"<br><br>
+      <strong>🧠 Context memory</strong><br>
+      • After finding a meeting: "join it", "delete it", "reschedule it to Friday"<br><br>
+      <strong>🎤 Voice</strong><br>
+      • Tap the mic button and speak naturally`);
     return;
   }
 
-  // ── INTENT: Today's meetings ───────────────────────────────
-  if (nlpHas(input, 'today', 'this morning', 'this afternoon')) {
-    const todayOnce = meetings.filter(m=>m.date===today);
-    const todayRec  = recurring.filter(r=>r.days.includes(todayDay));
-    const all = [...todayOnce, ...todayRec.map(r=>({...r,isRec:true}))];
+  // ── INTENT: Today's meetings
+  if (nlpHas(input, 'today', 'this morning', 'this afternoon') && !nlpHas(input, 'free', 'available', 'slot')) {
+    const todayOnce = meetings.filter(m => m.date === today);
+    const todayRec  = recurring.filter(r => r.days.includes(todayDay));
+    const all = [...todayOnce, ...todayRec.map(r => ({...r, isRec: true}))];
+    _aiLastIntent = 'today';
     if (!all.length) {
-      aiBotMsg(`You have no meetings today, ${userName}! 🎉 Enjoy the free time.`);
+      aiBotMsg(`No meetings today, ${userName}! 🎉 Enjoy the free time.`,
+        [{ label: '➕ Schedule one', fn: () => aiAction('open-new-meeting') }]);
     } else {
-      all.sort((a,b)=>a.time.localeCompare(b.time));
+      all.sort((a, b) => a.time.localeCompare(b.time));
       const list = all.map(m =>
-        `• <strong>${m.subject}</strong> at ${m.time} ${m.isRec?'🔄':''}
-         <button class="ai-inline-btn" onclick="window.open('${m.link||buildLink(m.platform,m.code)}','_blank')">▶ Join</button>`
+        `• <strong>${m.subject}</strong> at ${m.time} ${m.isRec ? '🔄' : ''} ` +
+        `<button class="ai-inline-btn" onclick="window.open('${m.link || buildLink(m.platform, m.code)}','_blank')">▶ Join</button>`
       ).join('<br>');
-      aiBotMsg(`You have <strong>${all.length}</strong> meeting${all.length>1?'s':''} today:<br><br>${list}`);
+      aiBotMsg(`You have <strong>${all.length}</strong> meeting${all.length > 1 ? 's' : ''} today:<br><br>${list}`);
     }
     return;
   }
 
-  // ── INTENT: Next meeting ───────────────────────────────────
-  if (nlpHas(input, 'next meeting', 'upcoming', 'next up', 'soon')) {
-    const now = new Date();
-    const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    // Look for meetings later today first
-    const laterToday = meetings
-      .filter(m => m.date === today && m.time > nowStr)
-      .sort((a,b)=>a.time.localeCompare(b.time));
-    if (laterToday.length) {
-      const m = laterToday[0];
-      aiBotMsg(
-        `Your next meeting is <strong>${m.subject}</strong> at <strong>${m.time}</strong> today on ${m.platform==='meet'?'Google Meet':m.platform}.`,
-        [{ label: '▶ Join now', fn: () => aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) }) }]
-      );
+  // ── INTENT: Past meetings
+  if (nlpHas(input, 'past', 'previous', 'last week', 'yesterday', 'last monday', 'last tuesday', 'last wednesday', 'last thursday', 'last friday')) {
+    let filterDate = null;
+    if (nlpHas(input, 'yesterday')) { const d = new Date(); d.setDate(d.getDate()-1); filterDate = d.toISOString().slice(0,10); }
+    else if (nlpHas(input, 'last monday'))    { const d = new Date(); d.setDate(d.getDate() - ((d.getDay()+6)%7+1)); filterDate = d.toISOString().slice(0,10); }
+    const past = filterDate
+      ? meetings.filter(m => m.date === filterDate)
+      : meetings.filter(m => m.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
+    if (!past.length) {
+      aiBotMsg(`No past meetings found.`);
     } else {
-      // Future meetings
-      const future = meetings.filter(m=>m.date>today).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
-      if (future.length) {
-        const m = future[0];
-        aiBotMsg(
-          `Your next meeting is <strong>${m.subject}</strong> on <strong>${m.date}</strong> at ${m.time}.`,
-          [{ label: '▶ Join', fn: () => aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) }) }]
-        );
-      } else {
-        aiBotMsg(`No upcoming meetings found. Want to schedule one?`,
-          [{ label: '➕ Schedule', fn: () => aiAction('open-new-meeting') }]);
-      }
+      aiBotMsg(`<strong>${past.length}</strong> past meeting(s):<br><br>` +
+        past.map(m => `• <strong>${m.subject}</strong> — ${m.date} at ${m.time}`).join('<br>'));
     }
     return;
   }
 
-  // ── INTENT: Join a meeting ─────────────────────────────────
+  // ── INTENT: Free slots
+  if (nlpHas(input, 'free', 'available', 'slot', 'gap', 'when can i', 'open time')) {
+    const targetDate = nlpExtractDate(input) || today;
+    const slots = nlpFreeSlots(targetDate);
+    if (!slots.length) {
+      aiBotMsg(`No free slots found on <strong>${targetDate}</strong> within your working hours.`);
+    } else {
+      aiBotMsg(`Free slots on <strong>${targetDate}</strong>:<br><br>` +
+        slots.map(s => `• ${s}`).join('<br>') +
+        `<br><br><em>Based on your working hours and existing meetings.</em>`,
+        [{ label: '➕ Schedule in a slot', fn: () => aiAction('prefill-meeting', { date: targetDate }) }]);
+    }
+    return;
+  }
+
+  // ── INTENT: Next meeting
+  if (nlpHas(input, 'next meeting', 'upcoming', 'next up', 'soon')) {
+    const now    = new Date();
+    const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const laterToday = meetings.filter(m => m.date === today && m.time > nowStr).sort((a,b) => a.time.localeCompare(b.time));
+    const m = laterToday[0] || meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date))[0];
+    if (m) {
+      _aiLastResult = m; _aiLastIntent = 'next';
+      aiBotMsg(`Next: <strong>${m.subject}</strong> on <strong>${m.date === today ? 'today' : m.date}</strong> at ${m.time} (${m.platform === 'meet' ? 'Google Meet' : m.platform}).`,
+        [
+          { label: '▶ Join', fn: () => aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) }) },
+          { label: '✏️ Reschedule', fn: () => { toggleAI(); openEditModal(m.id); } }
+        ]);
+    } else {
+      aiBotMsg(`No upcoming meetings!`, [{ label: '➕ Schedule', fn: () => aiAction('open-new-meeting') }]);
+    }
+    return;
+  }
+
+  // ── INTENT: Filter by platform
+  if (nlpHas(input, 'zoom meetings', 'all zoom', 'meet meetings', 'all meet', 'jitsi meetings', 'all jitsi', 'show zoom', 'show meet', 'show jitsi', 'filter by')) {
+    const plat = nlpExtractPlatform(input);
+    const platName = plat === 'meet' ? 'Google Meet' : plat === 'zoom' ? 'Zoom' : 'Jitsi';
+    const filtered = [...meetings, ...recurring].filter(m => m.platform === plat);
+    if (!filtered.length) {
+      aiBotMsg(`No ${platName} meetings found.`);
+    } else {
+      aiBotMsg(`<strong>${filtered.length}</strong> ${platName} meeting(s):<br><br>` +
+        filtered.map(m =>
+          `• <strong>${m.subject}</strong> — ${m.days ? m.days.join(',') : m.date} at ${m.time} ` +
+          `<button class="ai-inline-btn" onclick="window.open('${m.link || buildLink(m.platform, m.code)}','_blank')">▶</button>`
+        ).join('<br>'));
+    }
+    return;
+  }
+
+  // ── INTENT: Join
   if (nlpHas(input, 'join', 'open meeting', 'start meeting')) {
     const found = nlpFindMeeting(input);
     if (found) {
+      _aiLastResult = found;
       aiAction('join-meeting', { link: found.link || buildLink(found.platform, found.code) });
-      aiBotMsg(`Opening <strong>${found.subject}</strong> now! 🚀`);
+      aiBotMsg(`Opening <strong>${found.subject}</strong>! 🚀`);
     } else {
-      // Join next upcoming
       const now    = new Date();
       const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      const next   = meetings.filter(m=>m.date===today&&m.time>=nowStr).sort((a,b)=>a.time.localeCompare(b.time))[0]
-                  || meetings.filter(m=>m.date>today).sort((a,b)=>a.date.localeCompare(b.date))[0];
+      const next   = meetings.filter(m => m.date === today && m.time >= nowStr).sort((a,b) => a.time.localeCompare(b.time))[0]
+                  || meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date))[0];
       if (next) {
-        aiBotMsg(`Found your next meeting: <strong>${next.subject}</strong>`,
+        _aiLastResult = next;
+        aiBotMsg(`Next meeting: <strong>${next.subject}</strong>`,
           [{ label: '▶ Join', fn: () => aiAction('join-meeting', { link: next.link || buildLink(next.platform, next.code) }) }]);
       } else {
-        aiBotMsg(`No meetings found to join. Which meeting did you mean?`);
+        aiBotMsg(`No meetings found to join.`);
       }
     }
     return;
   }
 
-  // ── INTENT: Schedule / create meeting ─────────────────────
+  // ── INTENT: Reschedule
+  if (nlpHas(input, 'reschedule', 'move', 'change time', 'change date')) {
+    const found   = nlpFindMeeting(input);
+    const newDate = nlpExtractDate(input);
+    const newTime = nlpExtractTime(input);
+    if (found) {
+      _aiLastResult = found;
+      if (!found.days && (newDate || newTime)) {
+        const conflict = nlpCheckConflict(newDate || found.date, newTime || found.time);
+        if (conflict && conflict.id !== found.id) {
+          aiBotMsg(`⚠️ Conflict: <strong>${conflict.subject}</strong> is already at that time. Reschedule anyway?`, [
+            { label: 'Yes, reschedule', fn: () => rescheduleViaAI(found, newDate, newTime) },
+            { label: 'Cancel', fn: () => aiBotMsg('Cancelled.') }
+          ]);
+        } else {
+          rescheduleViaAI(found, newDate, newTime);
+        }
+      } else {
+        aiBotMsg(`I'll open the edit form for <strong>${found.subject}</strong>.`,
+          [{ label: '✏️ Edit', fn: () => { toggleAI(); openEditModal(found.id); } }]);
+      }
+    } else {
+      aiBotMsg(`Which meeting do you want to reschedule? Say "reschedule [meeting name] to [time/date]".`);
+    }
+    return;
+  }
+
+  // ── INTENT: Schedule / create
   if (nlpHas(input, 'schedule','create','add','new meeting','book','set up','arrange')) {
     const date     = nlpExtractDate(input);
     const time     = nlpExtractTime(input);
     const platform = nlpExtractPlatform(input);
-    // Try to extract a subject — words after "called", "titled", "named", or before "at/on"
-    let subject = '';
-    const calledMatch = input.match(/(?:called|titled|named|for)\s+["']?([a-z0-9 ]+?)["']?(?:\s+(?:at|on|with|using)|$)/i);
+    let subject    = '';
+    const calledMatch = input.match(/(?:called|titled|named|for)\s+["'']?([a-z0-9 ]+?)["'']?(?:\s+(?:at|on|with|using)|$)/i);
     if (calledMatch) subject = calledMatch[1].trim();
 
+    // Conflict check
+    if (date && time) {
+      const conflict = nlpCheckConflict(date, time);
+      if (conflict) {
+        aiBotMsg(`⚠️ You already have <strong>${conflict.subject}</strong> around ${time} on ${date}. Schedule anyway?`, [
+          { label: 'Yes, schedule', fn: () => aiAction('prefill-meeting', { subject, date, time, platform }) },
+          { label: 'Find free slot', fn: () => askAI(`when am I free on ${date}`) },
+          { label: 'Cancel', fn: () => aiBotMsg('Cancelled.') }
+        ]);
+        return;
+      }
+    }
+
     if (date || time) {
-      aiBotMsg(`Got it! I'll open the form for you${subject?' for "'+subject+'"':''}${date?' on '+date:''}${time?' at '+time:''}. 📝`,
+      aiBotMsg(`Got it!${subject ? ' For "' + subject + '".' : ''} Opening form${date ? ' for ' + date : ''}${time ? ' at ' + time : ''} 📝`,
         [{ label: '➕ Open form', fn: () => aiAction('prefill-meeting', { subject, date, time, platform }) }]);
     } else {
-      aiBotMsg(`Sure! Let me open the meeting form for you.`,
-        [{ label: '➕ New meeting', fn: () => aiAction('open-new-meeting') }]);
+      aiBotMsg(`Opening the meeting form.`, [{ label: '➕ New meeting', fn: () => aiAction('open-new-meeting') }]);
     }
     return;
   }
 
-  // ── INTENT: Delete meeting ─────────────────────────────────
+  // ── INTENT: Delete
   if (nlpHas(input, 'delete','remove','cancel','clear')) {
     const found = nlpFindMeeting(input);
     if (found) {
-      aiBotMsg(`Are you sure you want to delete <strong>${found.subject}</strong>?`,
-        [
-          { label: '🗑 Yes, delete', fn: () => {
-              found.days ? deleteRecurring(found.id) : deleteMeeting(found.id);
-              aiBotMsg(`✅ <strong>${found.subject}</strong> has been deleted.`);
-          }},
-          { label: 'Cancel', fn: () => aiBotMsg('No problem, keeping it!') }
-        ]);
+      _aiLastResult = found;
+      aiBotMsg(`Delete <strong>${found.subject}</strong>${found.date ? ' on ' + found.date : ''}?`, [
+        { label: '🗑 Yes, delete', fn: () => {
+            found.days ? deleteRecurring(found.id) : deleteMeeting(found.id);
+            aiBotMsg(`✅ <strong>${found.subject}</strong> deleted.`);
+            _aiLastResult = null;
+        }},
+        { label: 'Cancel', fn: () => aiBotMsg('Keeping it!') }
+      ]);
     } else {
-      aiBotMsg(`Which meeting do you want to delete? Here are your upcoming ones:<br><br>` +
-        meetings.slice(0,5).map(m=>`• <strong>${m.subject}</strong> — ${m.date}`).join('<br>') +
-        `<br><br>Say "delete [meeting name]" to remove one.`);
+      const upcoming = meetings.filter(m => m.date >= today).sort((a,b) => a.date.localeCompare(b.date)).slice(0, 5);
+      aiBotMsg(`Which meeting? Say "delete [name]".<br><br>` +
+        upcoming.map(m => `• <strong>${m.subject}</strong> — ${m.date}`).join('<br>'));
     }
     return;
   }
 
-  // ── INTENT: Find / search meeting ──────────────────────────
+  // ── INTENT: Find / search
   if (nlpHas(input, 'find','search','look for','where is','show me')) {
     const found = nlpFindMeeting(input);
     if (found) {
+      _aiLastResult = found; _aiLastIntent = 'found';
       const isRec = !!found.days;
       aiBotMsg(
-        `Found it! <strong>${found.subject}</strong><br>
-        ${isRec ? '🔄 Recurring: '+found.days.join(', ') : '📅 '+found.date} at ${found.time}<br>
-        Platform: ${found.platform==='meet'?'Google Meet':found.platform}`,
-        [{ label: '▶ Join', fn: () => aiAction('join-meeting', { link: found.link || buildLink(found.platform, found.code) }) }]
+        `Found: <strong>${found.subject}</strong><br>` +
+        `${isRec ? '🔄 ' + found.days.join(', ') : '📅 ' + found.date} at ${found.time}<br>` +
+        `Platform: ${found.platform === 'meet' ? 'Google Meet' : found.platform}`,
+        [
+          { label: '▶ Join', fn: () => aiAction('join-meeting', { link: found.link || buildLink(found.platform, found.code) }) },
+          { label: '✏️ Edit', fn: () => { toggleAI(); if (isRec) openRecurringEdit(found.id); else openEditModal(found.id); } },
+          { label: '🗑 Delete', fn: () => askAI(`delete ${found.subject}`) }
+        ]
       );
     } else {
-      // Open meetings page with focus
-      aiBotMsg(`I couldn't find that specific meeting. Let me open All Meetings so you can search there.`,
-        [{ label: '🔍 All Meetings', fn: () => aiAction('navigate', { page: 'meetings' }) }]);
+      aiBotMsg(`Couldn't find that meeting.`, [{ label: '🔍 All Meetings', fn: () => aiAction('navigate', { page: 'meetings' }) }]);
     }
     return;
   }
 
-  // ── INTENT: Summary / stats ────────────────────────────────
+  // ── INTENT: Summary
   if (nlpHas(input, 'summary','overview','stats','how many','count','total')) {
-    const todayCount = meetings.filter(m=>m.date===today).length +
-                       recurring.filter(r=>r.days.includes(todayDay)).length;
-    const future     = meetings.filter(m=>m.date>today);
+    const todayCount = meetings.filter(m => m.date === today).length + recurring.filter(r => r.days.includes(todayDay)).length;
+    const future     = meetings.filter(m => m.date > today);
+    const past       = meetings.filter(m => m.date < today);
     const platforms  = {};
-    [...meetings,...recurring].forEach(m => { platforms[m.platform] = (platforms[m.platform]||0)+1; });
-    const topPlat    = Object.entries(platforms).sort((a,b)=>b[1]-a[1])[0];
+    [...meetings, ...recurring].forEach(m => { platforms[m.platform] = (platforms[m.platform] || 0) + 1; });
+    const topPlat = Object.entries(platforms).sort((a,b) => b[1]-a[1])[0];
     aiBotMsg(
-      `Here's your meeting overview, ${userName}:<br><br>
-      📋 <strong>${meetings.length}</strong> one-time meetings<br>
-      🔄 <strong>${recurring.length}</strong> recurring meetings<br>
-      📅 <strong>${todayCount}</strong> meetings today<br>
-      ⏭ <strong>${future.length}</strong> upcoming meetings<br>
-      ${topPlat ? `🏆 Most used: <strong>${topPlat[0]==='meet'?'Google Meet':topPlat[0]}</strong> (${topPlat[1]} meetings)` : ''}`,
+      `Meeting overview for <strong>${userName}</strong>:<br><br>` +
+      `📋 <strong>${meetings.length}</strong> one-time &nbsp;🔄 <strong>${recurring.length}</strong> recurring<br>` +
+      `📅 <strong>${todayCount}</strong> today &nbsp;⏭ <strong>${future.length}</strong> upcoming<br>` +
+      `📂 <strong>${past.length}</strong> past meetings<br>` +
+      `${topPlat ? `🏆 Top platform: <strong>${topPlat[0] === 'meet' ? 'Google Meet' : topPlat[0]}</strong> (${topPlat[1]})` : ''}`,
       [{ label: '📊 Full analytics', fn: () => aiAction('navigate', { page: 'analytics' }) }]
     );
     return;
   }
 
-  // ── INTENT: This week ──────────────────────────────────────
-  if (nlpHas(input, 'this week','week')) {
+  // ── INTENT: This week
+  if (nlpHas(input, 'this week', 'week')) {
     const now   = new Date();
     const start = new Date(now); start.setDate(now.getDate() - now.getDay());
     const end   = new Date(start); end.setDate(start.getDate() + 6);
-    const startStr = start.toISOString().slice(0,10);
-    const endStr   = end.toISOString().slice(0,10);
-    const thisWeek = meetings.filter(m => m.date >= startStr && m.date <= endStr);
+    const thisWeek = meetings.filter(m => m.date >= start.toISOString().slice(0,10) && m.date <= end.toISOString().slice(0,10));
     aiBotMsg(thisWeek.length
-      ? `This week you have <strong>${thisWeek.length}</strong> meeting(s):<br><br>` +
-        thisWeek.sort((a,b)=>a.date.localeCompare(b.date)).map(m=>`• <strong>${m.subject}</strong> — ${m.date} at ${m.time}`).join('<br>')
-      : `No meetings scheduled this week.`,
-      [{ label: '📆 Open calendar', fn: () => aiAction('navigate', { page: 'calendarPage' }) }]
+      ? `This week: <strong>${thisWeek.length}</strong> meeting(s):<br><br>` +
+        thisWeek.sort((a,b) => a.date.localeCompare(b.date)).map(m => `• <strong>${m.subject}</strong> — ${m.date} at ${m.time}`).join('<br>')
+      : 'No meetings this week.',
+      [{ label: '📆 Calendar', fn: () => aiAction('navigate', { page: 'calendarPage' }) }]
     );
     return;
   }
 
-  // ── INTENT: Recurring meetings ─────────────────────────────
+  // ── INTENT: Recurring
   if (nlpHas(input, 'recurring','repeat','every week','weekly','daily')) {
     if (!recurring.length) {
-      aiBotMsg(`You have no recurring meetings yet.`,
-        [{ label: '➕ Create one', fn: () => aiAction('navigate', { page: 'dashboard' }) }]);
+      aiBotMsg(`No recurring meetings yet.`, [{ label: '➕ Create', fn: () => aiAction('navigate', { page: 'dashboard' }) }]);
     } else {
-      aiBotMsg(
-        `You have <strong>${recurring.length}</strong> recurring meeting(s):<br><br>` +
-        recurring.map(r=>`• <strong>${r.subject}</strong> — ${r.days.join(', ')} at ${r.time}`).join('<br>')
-      );
+      aiBotMsg(`<strong>${recurring.length}</strong> recurring meeting(s):<br><br>` +
+        recurring.map(r => `• <strong>${r.subject}</strong> — ${r.days.join(', ')} at ${r.time}`).join('<br>'));
     }
     return;
   }
 
-  // ── INTENT: Navigation ─────────────────────────────────────
+  // ── INTENT: Navigation
   if (nlpHas(input, 'go to','open','navigate','show me','take me')) {
-    if (nlpHas(input, 'dashboard','home'))   { aiBotMsg('Taking you to the Dashboard! 🏠'); setTimeout(()=>aiAction('navigate',{page:'dashboard'}),400); return; }
-    if (nlpHas(input, 'calendar'))           { aiBotMsg('Opening the Calendar! 📆');        setTimeout(()=>aiAction('navigate',{page:'calendarPage'}),400); return; }
-    if (nlpHas(input, 'analytics','stats','charts')) { aiBotMsg('Opening Analytics! 📊');  setTimeout(()=>aiAction('navigate',{page:'analytics'}),400); return; }
-    if (nlpHas(input, 'meetings','all meeting')) { aiBotMsg('Opening All Meetings! 📋');   setTimeout(()=>aiAction('navigate',{page:'meetings'}),400); return; }
+    if (nlpHas(input, 'dashboard','home'))              { aiBotMsg('Dashboard! 🏠');     setTimeout(() => aiAction('navigate', { page: 'dashboard' }), 400);     return; }
+    if (nlpHas(input, 'calendar'))                        { aiBotMsg('Calendar! 📆');       setTimeout(() => aiAction('navigate', { page: 'calendarPage' }), 400);  return; }
+    if (nlpHas(input, 'analytics','stats','charts'))  { aiBotMsg('Analytics! 📊');      setTimeout(() => aiAction('navigate', { page: 'analytics' }), 400);     return; }
+    if (nlpHas(input, 'meetings','all meeting'))        { aiBotMsg('All Meetings! 📋');    setTimeout(() => aiAction('navigate', { page: 'meetings' }), 400);       return; }
     if (nlpHas(input, 'settings','profile','account')) {
       const tab = nlpHas(input,'notification')?'notifications':nlpHas(input,'appear','theme')?'appearance':nlpHas(input,'security')?'security':'profile';
-      aiBotMsg('Opening Settings! ⚙️'); setTimeout(()=>aiAction('open-settings',{tab}),400); return;
+      aiBotMsg('Settings! ⚙️'); setTimeout(() => aiAction('open-settings', { tab }), 400); return;
     }
   }
 
-  // ── INTENT: Time-based greeting / status ───────────────────
+  // ── INTENT: Time / date
   if (nlpHas(input, 'what time', 'current time', 'date today')) {
     const now = new Date();
-    aiBotMsg(`It's currently <strong>${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</strong> on <strong>${now.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</strong>.`);
+    aiBotMsg(`It's <strong>${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</strong> — ${now.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}.`);
     return;
   }
 
-  // ── INTENT: Busiest day ────────────────────────────────────
-  if (nlpHas(input, 'busiest','most meetings','heavy day','packed')) {
+  // ── INTENT: Busiest day
+  if (nlpHas(input, 'busiest','most meetings','heavy','packed')) {
     const days = {Mon:0,Tue:0,Wed:0,Thu:0,Fri:0,Sat:0,Sun:0};
-    meetings.forEach(m => {
-      const d = new Date(m.date+'T12:00:00').toLocaleString('default',{weekday:'short'});
-      if (days[d]!==undefined) days[d]++;
-    });
+    meetings.forEach(m => { const d = new Date(m.date+'T12:00:00').toLocaleString('default',{weekday:'short'}); if(days[d]!==undefined) days[d]++; });
     recurring.forEach(r => r.days.forEach(d => { if(days[d]!==undefined) days[d]++; }));
-    const busiest = Object.entries(days).sort((a,b)=>b[1]-a[1])[0];
+    const busiest = Object.entries(days).sort((a,b) => b[1]-a[1])[0];
     aiBotMsg(busiest[1] > 0
-      ? `Your busiest day is <strong>${busiest[0]}</strong> with ${busiest[1]} meeting(s).`
-      : `You don't have enough meetings to determine a busiest day yet.`);
+      ? `Busiest day: <strong>${busiest[0]}</strong> with ${busiest[1]} meeting(s).`
+      : `Not enough data to determine busiest day.`);
     return;
   }
 
-  // ── INTENT: Free time / availability ──────────────────────
-  if (nlpHas(input, 'free','available','availability','gap','no meetings')) {
-    const todayMeetings = meetings.filter(m=>m.date===today).length;
+  // ── INTENT: Availability
+  if (nlpHas(input, 'availability','working hours','my hours')) {
     const avail = s.availability;
     aiBotMsg(
-      `Today you have <strong>${todayMeetings}</strong> meeting(s) scheduled.<br>
-      Your working hours are <strong>${avail?.start||'09:00'}</strong> to <strong>${avail?.end||'17:00'}</strong>.<br>
-      Buffer between meetings: <strong>${avail?.buffer||0} min</strong>.`,
+      `Working hours: <strong>${avail?.start||'09:00'}</strong> to <strong>${avail?.end||'17:00'}</strong><br>` +
+      `Buffer: <strong>${avail?.buffer||0} min</strong> between meetings<br>` +
+      `Max per day: <strong>${avail?.maxPerDay||10}</strong>`,
       [{ label: '⚙️ Edit availability', fn: () => aiAction('open-settings', { tab: 'availability' }) }]
     );
     return;
   }
 
-  // ── INTENT: Unknown — smart fallback ──────────────────────
-  // Try one more pass to see if any meeting name is mentioned
+  // ── Fallback: try to match a meeting name
   const mentioned = nlpFindMeeting(input);
   if (mentioned) {
+    _aiLastResult = mentioned;
+    const isRec = !!mentioned.days;
     aiBotMsg(
-      `I found <strong>${mentioned.subject}</strong>:<br>
-      ${mentioned.days ? '🔄 '+mentioned.days.join(', ') : '📅 '+mentioned.date} at ${mentioned.time}`,
-      [{ label: '▶ Join', fn: () => aiAction('join-meeting', { link: mentioned.link || buildLink(mentioned.platform, mentioned.code) }) }]
+      `Found <strong>${mentioned.subject}</strong>:<br>` +
+      `${isRec ? '🔄 '+mentioned.days.join(', ') : '📅 '+mentioned.date} at ${mentioned.time}`,
+      [
+        { label: '▶ Join', fn: () => aiAction('join-meeting', { link: mentioned.link || buildLink(mentioned.platform, mentioned.code) }) },
+        { label: '✏️ Edit', fn: () => { toggleAI(); isRec ? openRecurringEdit(mentioned.id) : openEditModal(mentioned.id); } }
+      ]
     );
     return;
   }
 
-  // True fallback
-  aiBotMsg(`I'm not sure about that one. Here's what I can help with:<br><br>
-    Try asking: <em>"meetings today"</em>, <em>"schedule a meeting tomorrow at 2pm"</em>,
-    <em>"join my standup"</em>, <em>"delete my 3pm meeting"</em>, or <em>"open the calendar"</em>.`);
+  aiBotMsg(`Not sure what you mean. Try: <em>"meetings today"</em>, <em>"when am I free"</em>, <em>"reschedule my standup to 2pm"</em>, or <em>"open the calendar"</em>.`);
+}
+
+// ── Reschedule a meeting via AI (direct update to Supabase)
+async function rescheduleViaAI(m, newDate, newTime) {
+  const updates = {
+    date: newDate || m.date,
+    time: newTime || m.time,
+  };
+  const { data, error } = await sb.from('meetings').update(updates).eq('id', m.id).select().single();
+  if (error) {
+    aiBotMsg(`❌ Couldn't reschedule: ${error.message}`);
+  } else {
+    _meetings = _meetings.map(x => x.id === m.id ? data : x);
+    refreshAll();
+    aiBotMsg(`✅ <strong>${m.subject}</strong> rescheduled to ${updates.date} at ${updates.time}.`);
+    _aiLastResult = data;
+  }
 }
 
 /* ============================================================
@@ -1706,6 +1941,10 @@ window.askAI               = askAI;
 window.processAI           = processAI;
 window.aiAction            = aiAction;
 window.aiUpdateSuggestions = aiUpdateSuggestions;
+window.aiClearChat         = aiClearChat;
+window.aiVoiceInput        = aiVoiceInput;
+window.aiCopyMsg           = aiCopyMsg;
+window.rescheduleViaAI     = rescheduleViaAI;
 
 /* ============================================================
    BOOTSTRAP
@@ -1736,3 +1975,57 @@ window.onload = async function () {
     }
   });
 };
+
+/* ============================================================
+   AI WINDOW — RESIZE HANDLE
+   Drag top-left corner to resize the chat window
+============================================================ */
+(function() {
+  let resizing = false, startX, startY, startW, startH, startRight, startBottom;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const handle = document.getElementById('aiResizeHandle');
+    const win    = document.getElementById('aiWindow');
+    if (!handle || !win) return;
+
+    handle.addEventListener('mousedown', e => {
+      resizing = true;
+      startX      = e.clientX;
+      startY      = e.clientY;
+      startW      = win.offsetWidth;
+      startH      = win.offsetHeight;
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!resizing) return;
+      const dx = startX - e.clientX; // dragging left = wider
+      const dy = startY - e.clientY; // dragging up = taller
+      const newW = Math.max(280, startW + dx);
+      const newH = Math.max(320, startH + dy);
+      win.style.width  = newW + 'px';
+      win.style.height = newH + 'px';
+    });
+
+    document.addEventListener('mouseup', () => { resizing = false; });
+
+    // Touch support
+    handle.addEventListener('touchstart', e => {
+      resizing = true;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startW = win.offsetWidth;
+      startH = win.offsetHeight;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', e => {
+      if (!resizing) return;
+      const dx = startX - e.touches[0].clientX;
+      const dy = startY - e.touches[0].clientY;
+      win.style.width  = Math.max(280, startW + dx) + 'px';
+      win.style.height = Math.max(320, startH + dy) + 'px';
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => { resizing = false; });
+  });
+})();

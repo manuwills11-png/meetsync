@@ -1273,6 +1273,7 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
 /* ============================================================
    AI ASSISTANT
 ============================================================ */
+/* ── AI Trigger button ── */
 #aiTrigger {
   position: fixed;
   bottom: clamp(16px, 2.5vw, 24px);
@@ -1292,22 +1293,273 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
   border: none;
 }
 #aiTrigger:hover { transform: scale(1.08); background: var(--accent-hov); }
+
+/* ── AI Window ── */
 #aiWindow {
   position: fixed;
   bottom: clamp(72px, 9vw, 90px);
   right:  clamp(16px, 2.5vw, 24px);
-  width:  clamp(300px, 36vw, 380px);
-  height: clamp(480px, 60vh, 560px);
+  width:  clamp(300px, 36vw, 400px);
+  height: clamp(480px, 60vh, 580px);
   max-height: calc(100vh - 110px);
+  min-width: 280px;
+  min-height: 320px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 20px;
   display: none;
   flex-direction: column;
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(124,108,248,0.1);
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(124,108,248,0.12);
   z-index: 4000;
   overflow: hidden;
 }
+#aiWindow.open { display: flex; animation: slideUp .3s ease; }
+
+/* ── Resize handle (top-left corner) ── */
+.ai-resize-handle {
+  position: absolute;
+  top: 0; left: 0;
+  width: 18px; height: 18px;
+  cursor: nwse-resize;
+  z-index: 10;
+  border-radius: 20px 0 0 0;
+}
+.ai-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 8px; height: 8px;
+  border-top: 2px solid var(--border-hov);
+  border-left: 2px solid var(--border-hov);
+  border-radius: 2px 0 0 0;
+}
+
+/* ── Header ── */
+.ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--accent-dim), transparent);
+  flex-shrink: 0;
+}
+.ai-header-left  { display: flex; align-items: center; gap: 10px; }
+.ai-header-actions { display: flex; align-items: center; gap: 4px; }
+.ai-dot { width: 8px; height: 8px; min-width: 8px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+.ai-header h4 { font-size: 13px; font-weight: 700; color: var(--accent); margin: 0; }
+.ai-subtitle { font-size: 10px; color: var(--text-3); display: block; margin-top: 1px; }
+.ai-header-btn { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 13px; padding: 3px 5px; border-radius: 5px; transition: .15s; }
+.ai-header-btn:hover { background: var(--surface2); color: var(--text); }
+.ai-close { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 16px; line-height: 1; transition: .2s var(--ease); padding: 4px 6px; border-radius: 6px; }
+.ai-close:hover { color: var(--text); background: var(--surface2); }
+
+/* ── Message body ── */
+.ai-body {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+  min-height: 0;
+}
+.ai-body::-webkit-scrollbar { width: 4px; }
+.ai-body::-webkit-scrollbar-thumb { background: var(--border-hov); border-radius: 4px; }
+
+/* ── Messages ── */
+.ai-msg {
+  max-width: 86%;
+  border-radius: 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  animation: fadeIn .2s ease;
+  display: flex;
+  flex-direction: column;
+}
+.ai-msg-content {
+  padding: 9px 13px;
+}
+.ai-msg.bot {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+  border-bottom-left-radius: 3px;
+  color: var(--text);
+}
+.ai-msg.user {
+  background: var(--accent);
+  color: #fff;
+  align-self: flex-end;
+  border-bottom-right-radius: 3px;
+  max-width: 80%;
+}
+.ai-msg.user .ai-msg-content { color: #fff; }
+
+/* ── Message footer: timestamp + copy ── */
+.ai-msg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px 6px;
+  gap: 6px;
+}
+.ai-ts {
+  font-size: 9.5px;
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.ai-msg.user .ai-ts { color: rgba(255,255,255,0.55); }
+.ai-copy-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: .15s;
+  opacity: 0;
+}
+.ai-msg:hover .ai-copy-btn { opacity: 1; }
+.ai-copy-btn:hover { background: var(--surface); color: var(--accent); }
+.ai-msg.user .ai-copy-btn { color: rgba(255,255,255,0.55); }
+.ai-msg.user .ai-copy-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+/* ── Typing indicator ── */
+.ai-typing {
+  padding: 13px 16px !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 5px;
+}
+.ai-typing span {
+  width: 7px; height: 7px;
+  background: var(--text-3);
+  border-radius: 50%;
+  animation: aiTypingBounce 1.2s infinite ease-in-out;
+}
+.ai-typing span:nth-child(2) { animation-delay: .15s; }
+.ai-typing span:nth-child(3) { animation-delay: .30s; }
+@keyframes aiTypingBounce {
+  0%,60%,100% { transform: translateY(0); opacity: .4; }
+  30%          { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── Action buttons ── */
+.ai-action-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 13px 10px; }
+.ai-action-btn {
+  padding: 5px 12px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(124,108,248,0.35);
+  border-radius: 99px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .18s var(--ease);
+}
+.ai-action-btn:hover { background: var(--accent); color: #fff; }
+
+/* ── Inline join buttons ── */
+.ai-inline-btn {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  background: var(--green-dim);
+  border: 1px solid rgba(34,211,160,0.3);
+  border-radius: 99px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .18s var(--ease);
+  vertical-align: middle;
+}
+.ai-inline-btn:hover { background: var(--green); color: #000; }
+
+/* ── Suggestion chips ── */
+.ai-suggestions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.ai-suggestions::-webkit-scrollbar { display: none; }
+.ai-chip {
+  padding: 4px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  font-size: 10.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: .18s var(--ease);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ai-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.ai-chip-danger { border-color: rgba(248,113,113,0.3); color: var(--red); }
+.ai-chip-danger:hover { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+
+/* ── Input area ── */
+.ai-input-area {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  gap: 7px;
+  flex-shrink: 0;
+  background: var(--surface);
+}
+.ai-voice-btn {
+  width: 32px; height: 32px; min-width: 32px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: .18s var(--ease);
+  flex-shrink: 0;
+}
+.ai-voice-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.ai-voice-btn.listening { background: var(--red-dim); border-color: var(--red); animation: pulse 1s infinite; }
+.ai-input-area input {
+  flex: 1;
+  padding: 9px 13px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  transition: .2s var(--ease);
+  font-family: var(--font-b);
+  min-width: 0;
+}
+.ai-input-area input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.ai-input-area input::placeholder { color: var(--text-3); }
+.ai-send {
+  width: 34px; height: 34px; min-width: 34px;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  transition: .2s var(--ease);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.ai-send:hover { background: var(--accent-hov); transform: scale(1.08); }
 #aiWindow.open { display: flex; animation: slideUp .3s ease; }
 .ai-header {
   display: flex;
