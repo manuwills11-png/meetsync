@@ -279,6 +279,18 @@
         </div>
         <div class="form-group"><label class="form-label">Meeting Code</label><input class="form-control" type="text" id="code" placeholder="abc-defg-hij"></div>
         <div class="form-group full"><label class="form-label">Notes (optional)</label><textarea class="form-control notes-textarea" id="notes" placeholder="Agenda, context..."></textarea></div>
+        <div class="form-group full">
+          <label class="bot-toggle-row">
+            <div class="bot-toggle-info">
+              <span class="bot-toggle-label">🤖 Ghost Bot</span>
+              <span class="bot-toggle-desc">Bot will silently join this meeting on your behalf</span>
+            </div>
+            <div class="toggle-switch">
+              <input type="checkbox" id="botEnabled">
+              <span class="toggle-slider"></span>
+            </div>
+          </label>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn-close-modal" onclick="closeModal('meetingModal')">Cancel</button>
@@ -300,6 +312,18 @@
           </select>
         </div>
         <div class="form-group"><label class="form-label">Meeting Code</label><input class="form-control" type="text" id="editCode"></div>
+        <div class="form-group full">
+          <label class="bot-toggle-row">
+            <div class="bot-toggle-info">
+              <span class="bot-toggle-label">🤖 Ghost Bot</span>
+              <span class="bot-toggle-desc">Bot will silently join this meeting on your behalf</span>
+            </div>
+            <div class="toggle-switch">
+              <input type="checkbox" id="editBotEnabled">
+              <span class="toggle-slider"></span>
+            </div>
+          </label>
+        </div>
       </div>
       <input type="hidden" id="editIndex">
       <div class="modal-actions">
@@ -351,7 +375,7 @@
         <div class="ai-dot"></div>
         <div>
           <h4>MeetSync AI</h4>
-          <span class="ai-subtitle">Smart assistant </span>
+          <span class="ai-subtitle">Smart assistant · No API needed</span>
         </div>
       </div>
       <div class="ai-header-actions">

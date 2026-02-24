@@ -463,12 +463,13 @@ async function addMeeting() {
   const platform = document.getElementById('platform').value;
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
+  const botEnabled = document.getElementById('botEnabled').checked;
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -476,6 +477,7 @@ async function addMeeting() {
   ['subject','code','notes'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
+  document.getElementById('botEnabled').checked = false;
   refreshAll();
   toast('Meeting scheduled!', 'success');
 }
@@ -499,9 +501,11 @@ function loadMeetings() {
           <div class="meeting-meta">
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
+            ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
           </div>
         </div>
         <div class="meeting-actions">
+          <button class="icon-btn ${m.bot_enabled?'bot-active':'bot-inactive'}" onclick="toggleBotEnabled('${m.id}', ${!m.bot_enabled})" title="${m.bot_enabled?'Disable bot':'Enable bot'}">🤖</button>
           <button class="icon-btn join"   onclick="window.open('${m.link}','_blank')" title="Join">▶</button>
           <button class="icon-btn"        onclick="openEditModal('${m.id}')"           title="Edit">✏️</button>
           <button class="icon-btn danger" onclick="deleteMeeting('${m.id}')"           title="Delete">🗑️</button>
@@ -542,12 +546,13 @@ function loadMeetings() {
 function openEditModal(id) {
   const m = _meetings.find(x => x.id === id);
   if (!m) return;
-  document.getElementById('editSubject').value  = m.subject;
-  document.getElementById('editDate').value     = m.date;
-  document.getElementById('editTime').value     = m.time;
-  document.getElementById('editPlatform').value = m.platform;
-  document.getElementById('editCode').value     = m.code;
-  document.getElementById('editIndex').value    = id;
+  document.getElementById('editSubject').value      = m.subject;
+  document.getElementById('editDate').value         = m.date;
+  document.getElementById('editTime').value         = m.time;
+  document.getElementById('editPlatform').value     = m.platform;
+  document.getElementById('editCode').value         = m.code;
+  document.getElementById('editIndex').value        = id;
+  document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
   openModal('editModal');
 }
 
@@ -556,10 +561,11 @@ async function updateMeeting() {
   const platform = document.getElementById('editPlatform').value;
   const code     = document.getElementById('editCode').value.trim();
   const updates  = {
-    subject: document.getElementById('editSubject').value.trim(),
-    date:    document.getElementById('editDate').value,
-    time:    document.getElementById('editTime').value,
-    platform, code, link: buildLink(platform, code)
+    subject:     document.getElementById('editSubject').value.trim(),
+    date:        document.getElementById('editDate').value,
+    time:        document.getElementById('editTime').value,
+    platform, code, link: buildLink(platform, code),
+    bot_enabled: document.getElementById('editBotEnabled').checked
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -576,6 +582,16 @@ async function deleteMeeting(id) {
   _meetings = _meetings.filter(m => m.id !== id);
   refreshAll();
   toast('Meeting removed.', 'info');
+}
+
+async function toggleBotEnabled(id, enable) {
+  const { data, error } = await sb.from('meetings')
+    .update({ bot_enabled: enable })
+    .eq('id', id).select().single();
+  if (error) { toast('Error updating bot setting.', 'error'); return; }
+  _meetings = _meetings.map(m => m.id === id ? data : m);
+  loadMeetings();
+  toast(enable ? '🤖 Ghost Bot enabled for this meeting' : '🤖 Ghost Bot disabled', enable ? 'success' : 'info');
 }
 
 /* ============================================================
@@ -1944,7 +1960,7 @@ window.aiUpdateSuggestions = aiUpdateSuggestions;
 window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
-window.rescheduleViaAI     = rescheduleViaAI;
+window.toggleBotEnabled       = toggleBotEnabled;
 
 /* ============================================================
    BOOTSTRAP
