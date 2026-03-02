@@ -1930,9 +1930,8 @@ async function loadTranscripts() {
     container.innerHTML = data.map(tx => {
       const date    = new Date(tx.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
       const time    = new Date(tx.created_at).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
-      const preview = tx.transcript ? tx.transcript.slice(0, 120).replace(/
-/g, ' ') + '...' : 'No transcript text';
-      const lines   = tx.transcript ? tx.transcript.split('\n').length : 0;
+      const preview = tx.transcript ? tx.transcript.slice(0, 120).replace(/\n/g, ' ') + '...' : 'No transcript text';
+      const lines   = tx.transcript ? tx.transcript.split('\\n').length : 0;
 
       return `
         <div class="meeting-card" style="cursor:pointer;" onclick="openTranscript('${tx.id}')">
