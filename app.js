@@ -212,52 +212,17 @@ async function handleAuth() {
     return;
   }
 
-  // Check if user has OTP enabled (default: ON) — read from Supabase settings
-  const localOtpEnabled = (getSettings().security?.otpEnabled) !== false;
-
-  if (!localOtpEnabled) {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    setAuthLoading(false); hideLoading(); _authInProgress = false;
-    if (error) {
-      msg.innerText = 'Invalid email or password.';
-      msg.className = 'auth-message msg-error';
-      return;
-    }
-    await loginSuccess(data.user);
-    return;
-  }
-
-  // OTP flow — mark pending so onAuthStateChange ignores the SIGNED_IN event
-  window._pendingEmail = email;
-
-  showLoading('Verifying password…');
+  // Sign in with password — session is used directly (no OTP detour)
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
-
-  if (error) {
-    window._pendingEmail = null;
-    msg.innerText = 'Invalid email or password.';
-    msg.className = 'auth-message msg-error';
-    setAuthLoading(false); hideLoading(); _authInProgress = false;
-    return;
-  }
-
-  showLoading('Sending verification code…');
-  await sb.auth.signOut();
-  const { error: otpError } = await sb.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false }
-  });
-
   setAuthLoading(false); hideLoading(); _authInProgress = false;
 
-  if (otpError) {
-    window._pendingEmail = null;
-    msg.innerText = otpError.message;
+  if (error) {
+    msg.innerText = 'Invalid email or password.';
     msg.className = 'auth-message msg-error';
     return;
   }
 
-  showOTPScreen();
+  await loginSuccess(data.user);
 }
 
 async function handlePasswordReset() {
@@ -426,6 +391,20 @@ async function disable2FA() {
 
 /* ============================================================
    DATA FETCHING
+   ⚠️  If meetings return empty, run this SQL in Supabase SQL Editor:
+
+   ALTER TABLE meetings      ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE recurring     ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+
+   CREATE POLICY "Users manage own meetings"
+     ON meetings FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+   CREATE POLICY "Users manage own recurring"
+     ON recurring FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+   CREATE POLICY "Users manage own settings"
+     ON user_settings FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 ============================================================ */
 async function fetchAllData() {
   if (!_currentUser) return;
@@ -448,9 +427,10 @@ function showPage(id, btn) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const nb = btn || document.getElementById('nav-' + id);
   if (nb) nb.classList.add('active');
-  if (id === 'analytics') updateAnalytics();
-  if (id === 'settings')  loadSettings('profile', document.querySelector('.settings-tab'));
-  if (id === 'meetings')  loadMeetings();
+  if (id === 'analytics')   updateAnalytics();
+  if (id === 'settings')    loadSettings('profile', document.querySelector('.settings-tab'));
+  if (id === 'meetings')    loadMeetings();
+  if (id === 'transcripts') loadTranscripts();
 }
 
 /* ============================================================
@@ -1918,6 +1898,103 @@ function toggleSidebar() {
 window.toggleOTPSetting    = toggleOTPSetting;
 window.toggleSidebar       = toggleSidebar;
 window.handleAuth          = handleAuth;
+
+/* ============================================================
+   TRANSCRIPTS
+============================================================ */
+async function loadTranscripts() {
+  const container = document.getElementById('transcriptsList');
+  if (!container) return;
+
+  container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Loading transcripts...</div>';
+
+  try {
+    const { data, error } = await sb
+      .from('transcripts')
+      .select('*')
+      .eq('user_id', _currentUser.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    if (!data || !data.length) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:60px 20px;color:var(--muted);">
+          <div style="font-size:48px;margin-bottom:16px;">📝</div>
+          <h3 style="margin-bottom:8px;color:var(--text);">No transcripts yet</h3>
+          <p>Install the MeetSync Chrome extension and join a Google Meet call.<br>Your transcript will appear here automatically.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = data.map(tx => {
+      const date    = new Date(tx.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+      const time    = new Date(tx.created_at).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+      const preview = tx.transcript ? tx.transcript.slice(0, 120).replace(/
+/g, ' ') + '...' : 'No transcript text';
+      const lines   = tx.transcript ? tx.transcript.split('\n').length : 0;
+
+      return `
+        <div class="meeting-card" style="cursor:pointer;" onclick="openTranscript('${tx.id}')">
+          <div class="meeting-avatar" style="background:linear-gradient(135deg,#7c6cf8,#5a4fcf);">📝</div>
+          <div class="meeting-info">
+            <div class="meeting-subject">${tx.meeting_id || 'Meeting Transcript'}</div>
+            <div class="meeting-meta">
+              <span class="badge-platform meet">📅 ${date}</span>
+              <span class="badge-platform zoom">🕐 ${time}</span>
+              <span class="badge-platform jitsi">💬 ${lines} lines</span>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:6px;">${preview}</div>
+          </div>
+          <div class="meeting-actions">
+            <button class="btn-icon" title="Open" onclick="event.stopPropagation();openTranscript('${tx.id}')">📖</button>
+            <button class="btn-icon danger" title="Delete" onclick="event.stopPropagation();deleteTranscript('${tx.id}')">🗑</button>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error loading transcripts: ${err.message}</div>`;
+  }
+}
+
+let _transcripts = {};
+
+async function openTranscript(id) {
+  const { data, error } = await sb.from('transcripts').select('*').eq('id', id).single();
+  if (error || !data) return;
+
+  _transcripts._current = data;
+
+  const date = new Date(data.created_at).toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  document.getElementById('transcriptModalTitle').textContent = data.meeting_id || 'Meeting Transcript';
+  document.getElementById('transcriptModalMeta').textContent  = `Recorded on ${date}`;
+  document.getElementById('transcriptModalBody').textContent  = data.transcript || 'No transcript available.';
+
+  openModal('transcriptModal');
+}
+
+function copyTranscript() {
+  const tx = _transcripts._current;
+  if (!tx) return;
+  navigator.clipboard.writeText(tx.transcript || '').then(() => {
+    showToast('Transcript copied to clipboard!', 'success');
+  });
+}
+
+async function deleteTranscript(id) {
+  if (!confirm('Delete this transcript? This cannot be undone.')) return;
+  const { error } = await sb.from('transcripts').delete().eq('id', id);
+  if (!error) {
+    showToast('Transcript deleted', 'info');
+    loadTranscripts();
+  }
+}
+
 window.showLoading         = showLoading;
 window.hideLoading         = hideLoading;
 window.toggleMode          = toggleMode;
@@ -1961,6 +2038,10 @@ window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
 window.toggleBotEnabled       = toggleBotEnabled;
+window.loadTranscripts        = loadTranscripts;
+window.openTranscript         = openTranscript;
+window.copyTranscript         = copyTranscript;
+window.deleteTranscript       = deleteTranscript;
 
 /* ============================================================
    BOOTSTRAP

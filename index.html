@@ -101,6 +101,10 @@
         <div class="nav-icon">📊</div>
         <span class="nav-text">Analytics</span>
       </button>
+      <button class="nav-btn" id="nav-transcripts" data-label="Transcripts" onclick="showPage('transcripts',this)">
+        <div class="nav-icon">📝</div>
+        <span class="nav-text">Transcripts</span>
+      </button>
 
       <span class="nav-label">Tools</span>
       <button class="nav-btn" id="nav-calendarPage" data-label="Calendar" onclick="showPage('calendarPage',this)">
@@ -238,6 +242,14 @@
             <div class="cal-details" id="dayMeetings"></div>
           </div>
         </div>
+      </div>
+
+      <!-- TRANSCRIPTS -->
+      <div id="transcripts" class="page">
+        <div class="page-header">
+          <div class="page-header-left"><h1>Transcripts</h1><p>Recordings and transcripts from your meetings</p></div>
+        </div>
+        <div id="transcriptsList"></div>
       </div>
 
       <!-- SETTINGS -->
@@ -408,6 +420,19 @@
   </div>
 
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- TRANSCRIPT DETAIL MODAL -->
+  <div class="modal-backdrop" id="transcriptModal">
+    <div class="modal-box" style="max-width:680px;max-height:80vh;display:flex;flex-direction:column;">
+      <h3>📝 <span id="transcriptModalTitle">Transcript</span></h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;" id="transcriptModalMeta"></p>
+      <div id="transcriptModalBody" style="overflow-y:auto;flex:1;background:rgba(255,255,255,0.03);border-radius:10px;padding:16px;font-size:13px;line-height:1.8;color:#ccc;white-space:pre-wrap;font-family:monospace;"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn-close-modal" onclick="closeModal('transcriptModal')">Close</button>
+        <button class="btn-accent" onclick="copyTranscript()">Copy Transcript</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Single script tag — no bridge needed, app.js exposes functions to window directly -->
   <script type="module" src="app.js"></script>
