@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://meetsync-iota.vercel.app//sitemap.xml
