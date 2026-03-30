@@ -436,6 +436,40 @@ function showPage(id, btn) {
 /* ============================================================
    MEETINGS CRUD
 ============================================================ */
+
+/* ============================================================
+   CATEGORIES
+============================================================ */
+let _activeCategoryFilter = 'all';
+
+const CAT_CONFIG = {
+  work:      { icon: '💼', label: 'Work' },
+  personal:  { icon: '👤', label: 'Personal' },
+  family:    { icon: '👨‍👩‍👧', label: 'Family' },
+  client:    { icon: '🤝', label: 'Client' },
+  interview: { icon: '🎯', label: 'Interview' },
+  education: { icon: '📚', label: 'Education' },
+  other:     { icon: '📌', label: 'Other' },
+};
+
+function catLabel(cat) {
+  const c = CAT_CONFIG[cat];
+  return c ? `${c.icon} ${c.label}` : '📌 Other';
+}
+
+function selectCategory(cat, el, pickerId = 'categoryPicker', inputId = 'category') {
+  document.querySelectorAll(`#${pickerId} .cat-pill`).forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(inputId).value = cat;
+}
+
+function filterByCategory(cat, btn) {
+  _activeCategoryFilter = cat;
+  document.querySelectorAll('.cat-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadMeetings();
+}
+
 async function addMeeting() {
   const subject  = document.getElementById('subject').value.trim();
   const date     = document.getElementById('date').value;
@@ -444,12 +478,13 @@ async function addMeeting() {
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
   const botEnabled = document.getElementById('botEnabled').checked;
+  const category   = document.getElementById('category').value || 'work';
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes, bot_enabled: botEnabled
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled, category
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -458,6 +493,9 @@ async function addMeeting() {
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
   document.getElementById('botEnabled').checked = false;
+  document.getElementById('category').value = 'work';
+  document.querySelectorAll('#categoryPicker .cat-pill').forEach(p => p.classList.remove('active'));
+  document.querySelector('#categoryPicker .cat-pill[data-cat="work"]').classList.add('active');
   refreshAll();
   toast('Meeting scheduled!', 'success');
 }
@@ -471,7 +509,8 @@ function loadMeetings() {
   let count = 0;
 
   meetings.forEach(m => {
-    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
+    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query) && !(m.category||'').includes(query)) return;
+    if (_activeCategoryFilter !== 'all' && m.category !== _activeCategoryFilter) return;
     count++;
     list.innerHTML += `
       <div class="meeting-card">
@@ -482,6 +521,7 @@ function loadMeetings() {
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
             ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
+            ${m.category ? `<span class="meeting-badge badge-cat badge-cat-${m.category}">${catLabel(m.category)}</span>` : ''}
           </div>
         </div>
         <div class="meeting-actions">
@@ -533,6 +573,11 @@ function openEditModal(id) {
   document.getElementById('editCode').value         = m.code;
   document.getElementById('editIndex').value        = id;
   document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
+  const editCat = m.category || 'work';
+  document.getElementById('editCategory').value = editCat;
+  document.querySelectorAll('#editCategoryPicker .cat-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.cat === editCat);
+  });
   openModal('editModal');
 }
 
@@ -545,7 +590,8 @@ async function updateMeeting() {
     date:        document.getElementById('editDate').value,
     time:        document.getElementById('editTime').value,
     platform, code, link: buildLink(platform, code),
-    bot_enabled: document.getElementById('editBotEnabled').checked
+    bot_enabled: document.getElementById('editBotEnabled').checked,
+    category: document.getElementById('editCategory').value || 'work'
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -2038,6 +2084,8 @@ window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
 window.toggleBotEnabled       = toggleBotEnabled;
 window.loadTranscripts        = loadTranscripts;
+window.selectCategory         = selectCategory;
+window.filterByCategory       = filterByCategory;
 window.openTranscript         = openTranscript;
 window.copyTranscript         = copyTranscript;
 window.deleteTranscript       = deleteTranscript;

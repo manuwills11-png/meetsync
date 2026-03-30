@@ -213,8 +213,18 @@
         <div class="search-row">
           <div class="search-wrap">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" placeholder="Search by subject, platform..." oninput="loadMeetings()">
+            <input type="text" id="searchInput" placeholder="Search by subject, platform, category..." oninput="loadMeetings()">
           </div>
+        </div>
+        <div class="category-filter-bar">
+          <button class="cat-filter active" data-cat="all" onclick="filterByCategory('all', this)">All</button>
+          <button class="cat-filter" data-cat="work" onclick="filterByCategory('work', this)">💼 Work</button>
+          <button class="cat-filter" data-cat="personal" onclick="filterByCategory('personal', this)">👤 Personal</button>
+          <button class="cat-filter" data-cat="family" onclick="filterByCategory('family', this)">👨‍👩‍👧 Family</button>
+          <button class="cat-filter" data-cat="client" onclick="filterByCategory('client', this)">🤝 Client</button>
+          <button class="cat-filter" data-cat="interview" onclick="filterByCategory('interview', this)">🎯 Interview</button>
+          <button class="cat-filter" data-cat="education" onclick="filterByCategory('education', this)">📚 Education</button>
+          <button class="cat-filter" data-cat="other" onclick="filterByCategory('other', this)">📌 Other</button>
         </div>
         <div id="meetingList"></div>
       </div>
@@ -292,6 +302,19 @@
       <h3>📋 New Meeting</h3>
       <div class="form-grid">
         <div class="form-group full"><label class="form-label">Subject</label><input class="form-control" type="text" id="subject" placeholder="Meeting title"></div>
+        <div class="form-group full">
+          <label class="form-label">Category</label>
+          <div class="category-picker" id="categoryPicker">
+            <div class="cat-pill active" data-cat="work" onclick="selectCategory('work', this)">💼 Work</div>
+            <div class="cat-pill" data-cat="personal" onclick="selectCategory('personal', this)">👤 Personal</div>
+            <div class="cat-pill" data-cat="family" onclick="selectCategory('family', this)">👨‍👩‍👧 Family</div>
+            <div class="cat-pill" data-cat="client" onclick="selectCategory('client', this)">🤝 Client</div>
+            <div class="cat-pill" data-cat="interview" onclick="selectCategory('interview', this)">🎯 Interview</div>
+            <div class="cat-pill" data-cat="education" onclick="selectCategory('education', this)">📚 Education</div>
+            <div class="cat-pill" data-cat="other" onclick="selectCategory('other', this)">📌 Other</div>
+          </div>
+          <input type="hidden" id="category" value="work">
+        </div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-control" type="date" id="date"></div>
         <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="time"></div>
         <div class="form-group"><label class="form-label">Platform</label>
@@ -326,6 +349,19 @@
       <h3>✏️ Edit Meeting</h3>
       <div class="form-grid">
         <div class="form-group full"><label class="form-label">Subject</label><input class="form-control" type="text" id="editSubject"></div>
+        <div class="form-group full">
+          <label class="form-label">Category</label>
+          <div class="category-picker" id="editCategoryPicker">
+            <div class="cat-pill" data-cat="work" onclick="selectCategory('work', this, 'editCategoryPicker', 'editCategory')">💼 Work</div>
+            <div class="cat-pill" data-cat="personal" onclick="selectCategory('personal', this, 'editCategoryPicker', 'editCategory')">👤 Personal</div>
+            <div class="cat-pill" data-cat="family" onclick="selectCategory('family', this, 'editCategoryPicker', 'editCategory')">👨‍👩‍👧 Family</div>
+            <div class="cat-pill" data-cat="client" onclick="selectCategory('client', this, 'editCategoryPicker', 'editCategory')">🤝 Client</div>
+            <div class="cat-pill" data-cat="interview" onclick="selectCategory('interview', this, 'editCategoryPicker', 'editCategory')">🎯 Interview</div>
+            <div class="cat-pill" data-cat="education" onclick="selectCategory('education', this, 'editCategoryPicker', 'editCategory')">📚 Education</div>
+            <div class="cat-pill" data-cat="other" onclick="selectCategory('other', this, 'editCategoryPicker', 'editCategory')">📌 Other</div>
+          </div>
+          <input type="hidden" id="editCategory" value="work">
+        </div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-control" type="date" id="editDate"></div>
         <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="editTime"></div>
         <div class="form-group"><label class="form-label">Platform</label>
