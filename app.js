@@ -430,46 +430,11 @@ function showPage(id, btn) {
   if (id === 'analytics')   updateAnalytics();
   if (id === 'settings')    loadSettings('profile', document.querySelector('.settings-tab'));
   if (id === 'meetings')    loadMeetings();
-  if (id === 'transcripts') loadTranscripts();
 }
 
 /* ============================================================
    MEETINGS CRUD
 ============================================================ */
-
-/* ============================================================
-   CATEGORIES
-============================================================ */
-let _activeCategoryFilter = 'all';
-
-const CAT_CONFIG = {
-  work:      { icon: '💼', label: 'Work' },
-  personal:  { icon: '👤', label: 'Personal' },
-  family:    { icon: '👨‍👩‍👧', label: 'Family' },
-  client:    { icon: '🤝', label: 'Client' },
-  interview: { icon: '🎯', label: 'Interview' },
-  education: { icon: '📚', label: 'Education' },
-  other:     { icon: '📌', label: 'Other' },
-};
-
-function catLabel(cat) {
-  const c = CAT_CONFIG[cat];
-  return c ? `${c.icon} ${c.label}` : '📌 Other';
-}
-
-function selectCategory(cat, el, pickerId = 'categoryPicker', inputId = 'category') {
-  document.querySelectorAll(`#${pickerId} .cat-pill`).forEach(p => p.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById(inputId).value = cat;
-}
-
-function filterByCategory(cat, btn) {
-  _activeCategoryFilter = cat;
-  document.querySelectorAll('.cat-filter').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadMeetings();
-}
-
 async function addMeeting() {
   const subject  = document.getElementById('subject').value.trim();
   const date     = document.getElementById('date').value;
@@ -478,13 +443,12 @@ async function addMeeting() {
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
   const botEnabled = document.getElementById('botEnabled').checked;
-  const category   = document.getElementById('category').value || 'work';
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes, bot_enabled: botEnabled, category
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -493,9 +457,6 @@ async function addMeeting() {
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
   document.getElementById('botEnabled').checked = false;
-  document.getElementById('category').value = 'work';
-  document.querySelectorAll('#categoryPicker .cat-pill').forEach(p => p.classList.remove('active'));
-  document.querySelector('#categoryPicker .cat-pill[data-cat="work"]').classList.add('active');
   refreshAll();
   toast('Meeting scheduled!', 'success');
 }
@@ -509,8 +470,7 @@ function loadMeetings() {
   let count = 0;
 
   meetings.forEach(m => {
-    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query) && !(m.category||'').includes(query)) return;
-    if (_activeCategoryFilter !== 'all' && m.category !== _activeCategoryFilter) return;
+    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
     count++;
     list.innerHTML += `
       <div class="meeting-card">
@@ -521,7 +481,6 @@ function loadMeetings() {
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
             ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
-            ${m.category ? `<span class="meeting-badge badge-cat badge-cat-${m.category}">${catLabel(m.category)}</span>` : ''}
           </div>
         </div>
         <div class="meeting-actions">
@@ -573,11 +532,6 @@ function openEditModal(id) {
   document.getElementById('editCode').value         = m.code;
   document.getElementById('editIndex').value        = id;
   document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
-  const editCat = m.category || 'work';
-  document.getElementById('editCategory').value = editCat;
-  document.querySelectorAll('#editCategoryPicker .cat-pill').forEach(p => {
-    p.classList.toggle('active', p.dataset.cat === editCat);
-  });
   openModal('editModal');
 }
 
@@ -590,8 +544,7 @@ async function updateMeeting() {
     date:        document.getElementById('editDate').value,
     time:        document.getElementById('editTime').value,
     platform, code, link: buildLink(platform, code),
-    bot_enabled: document.getElementById('editBotEnabled').checked,
-    category: document.getElementById('editCategory').value || 'work'
+    bot_enabled: document.getElementById('editBotEnabled').checked
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -1945,101 +1898,6 @@ window.toggleOTPSetting    = toggleOTPSetting;
 window.toggleSidebar       = toggleSidebar;
 window.handleAuth          = handleAuth;
 
-/* ============================================================
-   TRANSCRIPTS
-============================================================ */
-async function loadTranscripts() {
-  const container = document.getElementById('transcriptsList');
-  if (!container) return;
-
-  container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Loading transcripts...</div>';
-
-  try {
-    const { data, error } = await sb
-      .from('transcripts')
-      .select('*')
-      .eq('user_id', _currentUser.id)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    if (!data || !data.length) {
-      container.innerHTML = `
-        <div style="text-align:center;padding:60px 20px;color:var(--muted);">
-          <div style="font-size:48px;margin-bottom:16px;">📝</div>
-          <h3 style="margin-bottom:8px;color:var(--text);">No transcripts yet</h3>
-          <p>Install the MeetSync Chrome extension and join a Google Meet call.<br>Your transcript will appear here automatically.</p>
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = data.map(tx => {
-      const date    = new Date(tx.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
-      const time    = new Date(tx.created_at).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
-      const preview = tx.transcript ? tx.transcript.slice(0, 120).replace(/\n/g, ' ') + '...' : 'No transcript text';
-      const lines   = tx.transcript ? tx.transcript.split('\\n').length : 0;
-
-      return `
-        <div class="meeting-card" style="cursor:pointer;" onclick="openTranscript('${tx.id}')">
-          <div class="meeting-avatar" style="background:linear-gradient(135deg,#7c6cf8,#5a4fcf);">📝</div>
-          <div class="meeting-info">
-            <div class="meeting-subject">${tx.meeting_id || 'Meeting Transcript'}</div>
-            <div class="meeting-meta">
-              <span class="badge-platform meet">📅 ${date}</span>
-              <span class="badge-platform zoom">🕐 ${time}</span>
-              <span class="badge-platform jitsi">💬 ${lines} lines</span>
-            </div>
-            <div style="font-size:12px;color:var(--muted);margin-top:6px;">${preview}</div>
-          </div>
-          <div class="meeting-actions">
-            <button class="btn-icon" title="Open" onclick="event.stopPropagation();openTranscript('${tx.id}')">📖</button>
-            <button class="btn-icon danger" title="Delete" onclick="event.stopPropagation();deleteTranscript('${tx.id}')">🗑</button>
-          </div>
-        </div>`;
-    }).join('');
-
-  } catch (err) {
-    container.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error loading transcripts: ${err.message}</div>`;
-  }
-}
-
-let _transcripts = {};
-
-async function openTranscript(id) {
-  const { data, error } = await sb.from('transcripts').select('*').eq('id', id).single();
-  if (error || !data) return;
-
-  _transcripts._current = data;
-
-  const date = new Date(data.created_at).toLocaleString('en-IN', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  });
-
-  document.getElementById('transcriptModalTitle').textContent = data.meeting_id || 'Meeting Transcript';
-  document.getElementById('transcriptModalMeta').textContent  = `Recorded on ${date}`;
-  document.getElementById('transcriptModalBody').textContent  = data.transcript || 'No transcript available.';
-
-  openModal('transcriptModal');
-}
-
-function copyTranscript() {
-  const tx = _transcripts._current;
-  if (!tx) return;
-  navigator.clipboard.writeText(tx.transcript || '').then(() => {
-    showToast('Transcript copied to clipboard!', 'success');
-  });
-}
-
-async function deleteTranscript(id) {
-  if (!confirm('Delete this transcript? This cannot be undone.')) return;
-  const { error } = await sb.from('transcripts').delete().eq('id', id);
-  if (!error) {
-    showToast('Transcript deleted', 'info');
-    loadTranscripts();
-  }
-}
-
 window.showLoading         = showLoading;
 window.hideLoading         = hideLoading;
 window.toggleMode          = toggleMode;
@@ -2083,12 +1941,6 @@ window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
 window.toggleBotEnabled       = toggleBotEnabled;
-window.loadTranscripts        = loadTranscripts;
-window.selectCategory         = selectCategory;
-window.filterByCategory       = filterByCategory;
-window.openTranscript         = openTranscript;
-window.copyTranscript         = copyTranscript;
-window.deleteTranscript       = deleteTranscript;
 
 /* ============================================================
    BOOTSTRAP
