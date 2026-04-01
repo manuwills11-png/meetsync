@@ -2079,6 +2079,12 @@ input[type="color"].cat-color-input:hover { border-color: rgba(255,255,255,0.3);
   display: inline-block;
   flex-shrink: 0;
 }
+.cal-dot-overflow {
+  font-size: 8px;
+  color: var(--text-2);
+  line-height: 1;
+  flex-shrink: 0;
+}
 
 /* ============================================================
    CATEGORIES

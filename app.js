@@ -42,24 +42,66 @@ function getCategories() {
   try {
     const raw = JSON.parse(localStorage.getItem('categories') || 'null');
     if (!raw) return { ...DEFAULT_CATEGORIES };
-    // Merge: keep defaults for any missing key
-    const merged = { ...DEFAULT_CATEGORIES };
+    // Merge defaults for any missing default key, but KEEP all custom keys
+    const merged = {};
+    // First restore defaults (so renamed defaults aren't lost)
     Object.keys(DEFAULT_CATEGORIES).forEach(k => {
-      if (raw[k]) merged[k] = { ...DEFAULT_CATEGORIES[k], ...raw[k] };
+      merged[k] = raw[k] ? { ...DEFAULT_CATEGORIES[k], ...raw[k] } : { ...DEFAULT_CATEGORIES[k] };
+    });
+    // Then restore all custom (non-default) keys
+    Object.keys(raw).forEach(k => {
+      if (!DEFAULT_CATEGORIES[k]) merged[k] = { ...raw[k] };
     });
     return merged;
   } catch { return { ...DEFAULT_CATEGORIES }; }
 }
 
+/* Push categories to Supabase user_categories table.
+   Table DDL (run once in Supabase SQL editor):
+   ───────────────────────────────────────────────────
+   create table if not exists user_categories (
+     user_id uuid primary key references auth.users(id) on delete cascade,
+     categories jsonb not null default '{}'::jsonb,
+     updated_at timestamptz default now()
+   );
+   alter table user_categories enable row level security;
+   create policy "Users manage own categories" on user_categories
+     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+   ───────────────────────────────────────────────────
+*/
+async function saveCategoriesToSupabase(cats) {
+  if (!_currentUser) return;
+  try {
+    const { error } = await sb.from('user_categories').upsert(
+      { user_id: _currentUser.id, categories: cats, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    if (error) throw error;
+  } catch (e) {
+    console.warn('Category Supabase sync failed:', e.message);
+  }
+}
+
+async function loadCategoriesFromSupabase() {
+  if (!_currentUser) return;
+  try {
+    const { data, error } = await sb
+      .from('user_categories')
+      .select('categories')
+      .eq('user_id', _currentUser.id)
+      .single();
+    if (error || !data?.categories) return;
+    // Merge remote into local — remote wins
+    localStorage.setItem('categories', JSON.stringify(data.categories));
+  } catch (e) {
+    console.warn('Could not load categories from Supabase:', e.message);
+  }
+}
+
 async function saveCategories(cats) {
   localStorage.setItem('categories', JSON.stringify(cats));
   applyDynamicCategoryStyles();
-  if (!_currentUser) return;
-  try {
-    const s = getSettings();
-    s._categories = cats;
-    await saveSettings(s);
-  } catch(e) { console.warn('Category sync failed:', e.message); }
+  await saveCategoriesToSupabase(cats);
 }
 
 function applyDynamicCategoryStyles() {
@@ -160,11 +202,6 @@ function applySettingsToUI(s) {
 
   // Apply custom category styles
   applyDynamicCategoryStyles();
-
-  // Sync categories stored inside settings (cross-device)
-  if (s._categories) {
-    localStorage.setItem('categories', JSON.stringify(s._categories));
-  }
 }
 
 /* ============================================================
@@ -381,6 +418,9 @@ async function loginSuccess(user) {
 
   // Pull latest settings from Supabase (overwrites local if remote exists)
   await loadSettingsFromSupabase();
+
+  // Pull categories from Supabase
+  await loadCategoriesFromSupabase();
 
   // Seed email into profile if first login
   const s = getSettings();
@@ -812,15 +852,21 @@ function renderCalendar() {
     const hasMeeting  = dayMeetings.length > 0 || hasRec;
     const isToday     = ds === today;
 
-    // Build colored dots for up to 3 categories
+    // Build one colored dot per meeting (up to 5), then +N overflow indicator
     let dotsHtml = '';
     if (hasMeeting) {
-      const usedCats = [...new Set(dayMeetings.map(m => m.category || 'work'))];
-      if (hasRec && !usedCats.includes('work')) usedCats.push('work');
-      dotsHtml = `<div class="cal-dots">${usedCats.slice(0,3).map(cat => {
+      const allDayMeetings = [
+        ...dayMeetings.map(m => m.category || 'work'),
+        ...recurring.filter(r => r.days.includes(wd)).map(() => 'work')
+      ];
+      const shown   = allDayMeetings.slice(0, 5);
+      const overflow = allDayMeetings.length - shown.length;
+      const dotSpans = shown.map(cat => {
         const color = cats[cat]?.color || '#7c6cf8';
-        return `<span class="cal-dot" style="background:${color};"></span>`;
-      }).join('')}</div>`;
+        return `<span class="cal-dot" style="background:${color};" title="${cats[cat]?.label||cat}"></span>`;
+      }).join('');
+      const plusSpan = overflow > 0 ? `<span class="cal-dot-overflow">+${overflow}</span>` : '';
+      dotsHtml = `<div class="cal-dots">${dotSpans}${plusSpan}</div>`;
     }
 
     cal.innerHTML += `<div class="cal-day ${hasMeeting?'has-meeting':''} ${isToday?'today':''}" onclick="showMeetingsForDate('${ds}',this)">${d}${dotsHtml}</div>`;
@@ -1074,19 +1120,42 @@ function loadSettings(section, btn) {
 
   } else if (section === 'categories') {
     const cats = getCategories();
-    c.innerHTML = `<h3>Categories</h3><p class="desc">Customize category names, icons, and colors. Changes apply to heatmap, calendar, and badges.</p>
-      <div id="catEditorList" style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
-        ${Object.entries(cats).map(([key, cat]) => `
-          <div class="cat-editor-row" data-key="${key}">
-            <div class="cat-editor-preview" style="background:${cat.color}20;border:1.5px solid ${cat.color};border-radius:8px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;" onclick="pickCatIcon('${key}')" title="Click to change icon">${cat.icon}</div>
-            <input class="form-control cat-editor-name" type="text" value="${cat.label}" placeholder="Category name" data-key="${key}" style="flex:1;min-width:80px;" oninput="previewCatRow('${key}',this)">
-            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-              <input type="color" class="cat-color-input" value="${cat.color}" data-key="${key}" title="Pick color" style="width:36px;height:36px;border:none;background:none;cursor:pointer;padding:2px;border-radius:6px;" oninput="previewCatColor('${key}',this)">
-            </div>
-            <button class="btn-ghost cat-editor-reset" style="font-size:11px;padding:4px 10px;flex-shrink:0;" onclick="resetCatToDefault('${key}')">Reset</button>
-          </div>`).join('')}
+    const defaultKeys = Object.keys(DEFAULT_CATEGORIES);
+
+    function catRowHtml(key, cat, isDefault) {
+      return `
+        <div class="cat-editor-row" data-key="${key}">
+          <div class="cat-editor-preview" style="background:${cat.color}20;border:1.5px solid ${cat.color};border-radius:8px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;" onclick="pickCatIcon('${key}')" title="Click to change icon">${cat.icon}</div>
+          <input class="form-control cat-editor-name" type="text" value="${cat.label}" placeholder="Category name" data-key="${key}" style="flex:1;min-width:80px;" oninput="previewCatRow('${key}',this)">
+          <input type="color" class="cat-color-input" value="${cat.color}" data-key="${key}" title="Pick color" oninput="previewCatColor('${key}',this)">
+          ${isDefault
+            ? `<button class="btn-ghost cat-editor-reset" onclick="resetCatToDefault('${key}')">Reset</button>`
+            : `<button class="btn-ghost cat-editor-reset" style="border-color:var(--red);color:var(--red);" onclick="deleteCustomCat('${key}')">🗑</button>`
+          }
+        </div>`;
+    }
+
+    c.innerHTML = `<h3>Categories</h3><p class="desc">Customize names, icons, and colors. Add your own. Changes apply everywhere — heatmap, calendar, badges.</p>
+      <div id="catEditorList" style="display:flex;flex-direction:column;gap:10px;margin-top:16px;">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Default categories</div>
+        ${defaultKeys.map(k => catRowHtml(k, cats[k] || DEFAULT_CATEGORIES[k], true)).join('')}
+        <div id="customCatList" style="display:flex;flex-direction:column;gap:10px;margin-top:4px;">
+          ${Object.entries(cats).filter(([k]) => !defaultKeys.includes(k)).length > 0
+            ? `<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;">Custom categories</div>`
+            : ''}
+          ${Object.entries(cats).filter(([k]) => !defaultKeys.includes(k)).map(([k,v]) => catRowHtml(k, v, false)).join('')}
+        </div>
       </div>
-      <div style="display:flex;gap:10px;margin-top:20px;">
+
+      <!-- Add new category row -->
+      <div style="margin-top:14px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.12);border-radius:var(--radius);display:flex;gap:10px;align-items:center;flex-wrap:wrap;" id="addCatRow">
+        <div id="newCatIconBtn" style="width:36px;height:36px;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;" onclick="pickCatIcon('__new__')" title="Pick icon">✨</div>
+        <input id="newCatName" class="form-control" type="text" placeholder="New category name…" style="flex:1;min-width:100px;height:36px;">
+        <input id="newCatColor" type="color" class="cat-color-input" value="#a78bfa" title="Pick color">
+        <button class="btn-accent" style="height:36px;padding:0 16px;white-space:nowrap;" onclick="addCustomCat()">+ Add</button>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:16px;">
         <button class="btn-accent" onclick="saveCategorySettings()">💾 Save Categories</button>
         <button class="btn-ghost" onclick="resetAllCategories()">↺ Reset All</button>
       </div>
@@ -1225,28 +1294,87 @@ function pickCatIcon(key) {
   const label = document.getElementById('iconPickerLabel');
   const grid  = document.getElementById('iconPickerGrid');
   if (!panel || !label || !grid) return;
-  const currentCat = { ...cats[key], ...(_catEdits[key] || {}) };
-  label.textContent = currentCat.label || key;
+
+  let currentIcon = '✨';
+  if (key === '__new__') {
+    currentIcon = document.getElementById('newCatIconBtn')?.textContent || '✨';
+    label.textContent = 'new category';
+  } else {
+    const currentCat = { ...cats[key], ...(_catEdits[key] || {}) };
+    currentIcon = currentCat.icon || '📌';
+    label.textContent = currentCat.label || key;
+  }
+
   grid.innerHTML = ICON_PRESETS.map(icon =>
     `<button onclick="selectCatIcon('${key}','${icon}')"
-      style="width:36px;height:36px;font-size:18px;background:${icon===currentCat.icon?'rgba(124,108,248,0.25)':'rgba(255,255,255,0.04)'};border:1px solid ${icon===currentCat.icon?'#7c6cf8':'rgba(255,255,255,0.08)'};border-radius:8px;cursor:pointer;transition:all 0.15s;"
+      style="width:36px;height:36px;font-size:18px;background:${icon===currentIcon?'rgba(124,108,248,0.25)':'rgba(255,255,255,0.04)'};border:1px solid ${icon===currentIcon?'#7c6cf8':'rgba(255,255,255,0.08)'};border-radius:8px;cursor:pointer;transition:all 0.15s;"
       title="${icon}">${icon}</button>`
   ).join('');
   panel.style.display = 'block';
 }
 
 function selectCatIcon(key, icon) {
-  if (!_catEdits[key]) _catEdits[key] = {};
-  _catEdits[key].icon = icon;
-  // Update the preview box in the row
-  const row = document.querySelector(`.cat-editor-row[data-key="${key}"]`);
-  if (row) {
-    const preview = row.querySelector('.cat-editor-preview');
-    if (preview) preview.textContent = icon;
+  if (key === '__new__') {
+    // Update the new-category icon preview button
+    const btn = document.getElementById('newCatIconBtn');
+    if (btn) btn.textContent = icon;
+  } else {
+    if (!_catEdits[key]) _catEdits[key] = {};
+    _catEdits[key].icon = icon;
+    const row = document.querySelector(`.cat-editor-row[data-key="${key}"]`);
+    if (row) {
+      const preview = row.querySelector('.cat-editor-preview');
+      if (preview) preview.textContent = icon;
+    }
   }
   document.getElementById('iconPickerPanel').style.display = 'none';
   _iconPickerKey = null;
 }
+
+async function addCustomCat() {
+  const nameEl  = document.getElementById('newCatName');
+  const colorEl = document.getElementById('newCatColor');
+  const iconEl  = document.getElementById('newCatIconBtn');
+  const name    = nameEl?.value.trim();
+  if (!name) { toast('Enter a category name.', 'error'); nameEl?.focus(); return; }
+
+  const icon  = (iconEl?.textContent || '').trim() || '📌';
+  const color = colorEl?.value || '#a78bfa';
+
+  // Generate a safe, unique key
+  const key = 'custom_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
+
+  const cats = getCategories();
+  cats[key] = { label: name, icon, color };
+
+  // Disable button to prevent double-click
+  const addBtn = document.querySelector('#addCatRow .btn-accent');
+  if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Saving…'; }
+
+  await saveCategories(cats);          // localStorage + Supabase
+  applyDynamicCategoryStyles();
+  populateCategorySelects();
+  updateCategoryFilterBar();
+  toast(`Category "${name}" added!`, 'success');
+  // Re-render the categories settings panel
+  loadSettings('categories', document.querySelector('.settings-tab[onclick*="categories"]'));
+}
+
+async function deleteCustomCat(key) {
+  const cats = getCategories();
+  if (DEFAULT_CATEGORIES[key]) { toast('Cannot delete a default category.', 'error'); return; }
+  const label = cats[key]?.label || key;
+  if (!confirm(`Delete category "${label}"? Meetings using it will keep the key but show no label.`)) return;
+  delete cats[key];
+  await saveCategories(cats);          // localStorage + Supabase
+  applyDynamicCategoryStyles();
+  populateCategorySelects();
+  updateCategoryFilterBar();
+  refreshAll();
+  loadSettings('categories', document.querySelector('.settings-tab[onclick*="categories"]'));
+  toast(`Category "${label}" deleted.`, 'info');
+}
+
 
 async function saveCategorySettings() {
   const cats = getCategories();
@@ -2211,6 +2339,16 @@ function updateFocusBlock() {
   }
 }
 
+function hexToRgb(hex) {
+  // Accepts #rrggbb; returns [r, g, b]
+  const h = hex.replace('#','');
+  return [
+    parseInt(h.slice(0,2),16),
+    parseInt(h.slice(2,4),16),
+    parseInt(h.slice(4,6),16)
+  ];
+}
+
 function timeToMins(hhmm) {
   if (!hhmm) return 0;
   const [h, m] = hhmm.split(':').map(Number);
@@ -2332,23 +2470,22 @@ function renderHeatmap() {
   const days      = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const hours     = [8,9,10,11,12,13,14,15,16,17,18,19,20];
 
-  // Count meetings per day+hour and track dominant category
+  // Track count and ALL categories (with multiplicity) per cell
   const grid     = {};
-  const gridCats = {};
+  const gridCats = {}; // { day: { hour: [ catKey, catKey, ... ] } }
   days.forEach(d => {
     grid[d]     = {};
     gridCats[d] = {};
-    hours.forEach(h => { grid[d][h] = 0; gridCats[d][h] = {}; });
+    hours.forEach(h => { grid[d][h] = 0; gridCats[d][h] = []; });
   });
 
   meetings.forEach(m => {
     if (!m.date || !m.time) return;
-    const d   = new Date(m.date).toLocaleString('default', { weekday: 'short' });
-    const h   = parseInt(m.time.split(':')[0]);
+    const d = new Date(m.date).toLocaleString('default', { weekday: 'short' });
+    const h = parseInt(m.time.split(':')[0]);
     if (grid[d] && grid[d][h] !== undefined) {
       grid[d][h]++;
-      const cat = m.category || 'work';
-      gridCats[d][h][cat] = (gridCats[d][h][cat] || 0) + 1;
+      gridCats[d][h].push(m.category || 'work');
     }
   });
 
@@ -2358,24 +2495,57 @@ function renderHeatmap() {
     r.days.forEach(d => {
       if (grid[d] && grid[d][h] !== undefined) {
         grid[d][h]++;
-        gridCats[d][h]['work'] = (gridCats[d][h]['work'] || 0) + 1;
+        gridCats[d][h].push('work');
       }
     });
   });
 
   const max = Math.max(1, ...days.flatMap(d => hours.map(h => grid[d][h])));
 
-  // Helper: get dominant category color for a cell
-  function cellColor(d, h, count) {
-    if (count === 0) return 'rgba(255,255,255,0.04)';
-    const catMap = gridCats[d][h];
-    const dominant = Object.entries(catMap).sort((a,b) => b[1]-a[1])[0]?.[0] || 'work';
-    const hex = (cats[dominant]?.color) || '#7c6cf8';
-    const r = parseInt(hex.slice(1,3),16);
-    const g = parseInt(hex.slice(3,5),16);
-    const b = parseInt(hex.slice(5,7),16);
-    const opacity = 0.15 + (count/max)*0.85;
-    return `rgba(${r},${g},${b},${opacity})`;
+  // Build a CSS gradient (or solid color) showing ALL categories proportionally
+  function cellStyle(d, h) {
+    const count    = grid[d][h];
+    if (count === 0) return 'background:rgba(255,255,255,0.04);';
+
+    const catList  = gridCats[d][h]; // e.g. ['work','client','work']
+    const opacity  = 0.25 + (count / max) * 0.75;
+
+    // Count occurrences of each cat
+    const catCount = {};
+    catList.forEach(c => { catCount[c] = (catCount[c] || 0) + 1; });
+    const entries  = Object.entries(catCount); // [[cat, n], ...]
+
+    if (entries.length === 1) {
+      // Single category — solid color
+      const hex = cats[entries[0][0]]?.color || '#7c6cf8';
+      const [r,g,b] = hexToRgb(hex);
+      return `background:rgba(${r},${g},${b},${opacity});`;
+    }
+
+    // Multiple categories — diagonal stripe gradient
+    // Each stripe proportional to meeting count
+    const total   = catList.length;
+    let pct = 0;
+    const stops   = [];
+    entries.forEach(([cat, n]) => {
+      const hex    = cats[cat]?.color || '#7c6cf8';
+      const [r,g,b] = hexToRgb(hex);
+      const color  = `rgba(${r},${g},${b},${opacity})`;
+      const start  = Math.round((pct / total) * 100);
+      pct += n;
+      const end    = Math.round((pct / total) * 100);
+      stops.push(`${color} ${start}%`, `${color} ${end}%`);
+    });
+    return `background:linear-gradient(135deg,${stops.join(',')});`;
+  }
+
+  // Tooltip: list all meetings in cell
+  function cellTitle(d, h) {
+    const count   = grid[d][h];
+    const catList = gridCats[d][h];
+    if (count === 0) return `${d} ${minsToTime(h*60)}: no meetings`;
+    const catNames = catList.map(c => cats[c]?.label || c).join(', ');
+    return `${d} ${minsToTime(h*60)}: ${count} meeting${count!==1?'s':''} (${catNames})`;
   }
 
   container.innerHTML = `
@@ -2388,8 +2558,9 @@ function renderHeatmap() {
         <div class="heatmap-hour-label">${minsToTime(h*60)}</div>
         ${days.map(d => {
           const count = grid[d][h];
-          const bg = cellColor(d, h, count);
-          return `<div class="heatmap-cell" title="${d} ${minsToTime(h*60)}: ${count} meeting${count!==1?'s':''}" style="background:${bg};">${count > 0 ? count : ''}</div>`;
+          const style = cellStyle(d, h);
+          const title = cellTitle(d, h);
+          return `<div class="heatmap-cell" title="${title}" style="${style}">${count > 0 ? count : ''}</div>`;
         }).join('')}
       </div>`).join('')}`;
 }
@@ -2550,7 +2721,11 @@ function initApp() {
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && _currentUser) {
     await loadSettingsFromSupabase();
+    await loadCategoriesFromSupabase();
     applySettingsToUI(getSettings());
+    applyDynamicCategoryStyles();
+    updateCategoryFilterBar();
+    populateCategorySelects();
   }
 });
 
@@ -2575,6 +2750,8 @@ window.pickCatIcon           = pickCatIcon;
 window.selectCatIcon         = selectCatIcon;
 window.previewCatRow         = previewCatRow;
 window.previewCatColor       = previewCatColor;
+window.addCustomCat          = addCustomCat;
+window.deleteCustomCat       = deleteCustomCat;
 
 window.showLoading         = showLoading;
 window.hideLoading         = hideLoading;
