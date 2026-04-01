@@ -271,6 +271,16 @@
             <input type="text" id="searchInput" placeholder="Search by subject, platform..." oninput="loadMeetings()">
           </div>
         </div>
+        <div class="category-filter-bar" id="categoryFilterBar">
+          <button class="cat-filter active" data-cat="all" onclick="setCatFilter('all',this)">All</button>
+          <button class="cat-filter" data-cat="work"      onclick="setCatFilter('work',this)">💼 Work</button>
+          <button class="cat-filter" data-cat="client"    onclick="setCatFilter('client',this)">🤝 Client</button>
+          <button class="cat-filter" data-cat="personal"  onclick="setCatFilter('personal',this)">👤 Personal</button>
+          <button class="cat-filter" data-cat="family"    onclick="setCatFilter('family',this)">👨‍👩‍👧 Family</button>
+          <button class="cat-filter" data-cat="education" onclick="setCatFilter('education',this)">📚 Education</button>
+          <button class="cat-filter" data-cat="interview" onclick="setCatFilter('interview',this)">🎯 Interview</button>
+          <button class="cat-filter" data-cat="other"     onclick="setCatFilter('other',this)">📌 Other</button>
+        </div>
         <div id="meetingList"></div>
       </div>
 
@@ -357,6 +367,17 @@
           </select>
         </div>
         <div class="form-group"><label class="form-label">Meeting Code</label><input class="form-control" type="text" id="code" placeholder="abc-defg-hij"></div>
+        <div class="form-group"><label class="form-label">Category</label>
+          <select class="form-control" id="category">
+            <option value="work">💼 Work</option>
+            <option value="client">🤝 Client</option>
+            <option value="personal">👤 Personal</option>
+            <option value="family">👨‍👩‍👧 Family</option>
+            <option value="education">📚 Education</option>
+            <option value="interview">🎯 Interview</option>
+            <option value="other">📌 Other</option>
+          </select>
+        </div>
         <div class="form-group full"><label class="form-label">Notes (optional)</label><textarea class="form-control notes-textarea" id="notes" placeholder="Agenda, context..."></textarea></div>
         <div class="form-group full">
           <label class="bot-toggle-row">
@@ -391,6 +412,17 @@
           </select>
         </div>
         <div class="form-group"><label class="form-label">Meeting Code</label><input class="form-control" type="text" id="editCode"></div>
+        <div class="form-group"><label class="form-label">Category</label>
+          <select class="form-control" id="editCategory">
+            <option value="work">💼 Work</option>
+            <option value="client">🤝 Client</option>
+            <option value="personal">👤 Personal</option>
+            <option value="family">👨‍👩‍👧 Family</option>
+            <option value="education">📚 Education</option>
+            <option value="interview">🎯 Interview</option>
+            <option value="other">📌 Other</option>
+          </select>
+        </div>
         <div class="form-group full">
           <label class="bot-toggle-row">
             <div class="bot-toggle-info">

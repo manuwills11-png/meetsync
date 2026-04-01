@@ -18,6 +18,7 @@ let _meetings    = [];
 let _recurring   = [];
 let _currentUser = null;
 let _isSignup    = false;
+let _activeCatFilter = 'all';
 
 const getMeetings  = () => _meetings;
 const getRecurring = () => _recurring;
@@ -443,12 +444,13 @@ async function addMeeting() {
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
   const botEnabled = document.getElementById('botEnabled').checked;
+  const category   = document.getElementById('category').value || 'work';
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes, bot_enabled: botEnabled
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled, category
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -456,9 +458,17 @@ async function addMeeting() {
   ['subject','code','notes'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
+  document.getElementById('category').value = 'work';
   document.getElementById('botEnabled').checked = false;
   refreshAll();
   toast('Meeting scheduled!', 'success');
+}
+
+function setCatFilter(cat, btn) {
+  _activeCatFilter = cat;
+  document.querySelectorAll('.cat-filter').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadMeetings();
 }
 
 function loadMeetings() {
@@ -469,9 +479,13 @@ function loadMeetings() {
   list.innerHTML  = '';
   let count = 0;
 
+  const catLabels = { work:'💼 Work', client:'🤝 Client', personal:'👤 Personal', family:'👨‍👩‍👧 Family', education:'📚 Education', interview:'🎯 Interview', other:'📌 Other' };
+
   meetings.forEach(m => {
     if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
+    if (_activeCatFilter !== 'all' && (m.category || 'work') !== _activeCatFilter) return;
     count++;
+    const cat = m.category || 'work';
     list.innerHTML += `
       <div class="meeting-card">
         <div class="meeting-avatar plat-${m.platform}">${platIcon(m.platform)}</div>
@@ -480,6 +494,7 @@ function loadMeetings() {
           <div class="meeting-meta">
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
+            <span class="meeting-badge badge-cat badge-cat-${cat}">${catLabels[cat]||cat}</span>
             ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
           </div>
         </div>
@@ -530,6 +545,7 @@ function openEditModal(id) {
   document.getElementById('editTime').value         = m.time;
   document.getElementById('editPlatform').value     = m.platform;
   document.getElementById('editCode').value         = m.code;
+  document.getElementById('editCategory').value     = m.category || 'work';
   document.getElementById('editIndex').value        = id;
   document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
   openModal('editModal');
@@ -544,7 +560,8 @@ async function updateMeeting() {
     date:        document.getElementById('editDate').value,
     time:        document.getElementById('editTime').value,
     platform, code, link: buildLink(platform, code),
-    bot_enabled: document.getElementById('editBotEnabled').checked
+    bot_enabled: document.getElementById('editBotEnabled').checked,
+    category:    document.getElementById('editCategory').value || 'work'
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -555,7 +572,6 @@ async function updateMeeting() {
 }
 
 async function deleteMeeting(id) {
-  if (!confirm('Delete this meeting?')) return;
   const { error } = await sb.from('meetings').delete().eq('id', id);
   if (error) { toast('Error deleting: ' + error.message, 'error'); return; }
   _meetings = _meetings.filter(m => m.id !== id);
@@ -629,7 +645,6 @@ async function updateRecurring() {
 }
 
 async function deleteRecurring(id) {
-  if (!confirm('Delete this recurring meeting?')) return;
   const { error } = await sb.from('recurring').delete().eq('id', id);
   if (error) { toast('Error deleting: ' + error.message, 'error'); return; }
   _recurring = _recurring.filter(r => r.id !== id);
@@ -803,6 +818,60 @@ function updateAnalytics() {
     data: { labels:Object.keys(wc), datasets:[{ label:'Meetings', data:Object.values(wc), backgroundColor:'rgba(124,108,248,0.75)', borderRadius:6, borderSkipped:false }] },
     options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ stepSize:1 } } } }
   });
+
+  // Category breakdown chart
+  const catCanvas = document.getElementById('categoryChart');
+  if (catCanvas) {
+    const catCounts = { work:0, client:0, personal:0, family:0, education:0, interview:0, other:0 };
+    meetings.forEach(m => { const c = m.category || 'work'; if (catCounts[c] !== undefined) catCounts[c]++; });
+    const catColors = ['#60a5fa','#c084fc','#4ade80','#fb923c','#2dd4bf','#facc15','#9ca3af'];
+    const existingCatChart = Chart.getChart(catCanvas);
+    if (existingCatChart) existingCatChart.destroy();
+    new Chart(catCanvas, {
+      type: 'doughnut',
+      data: { labels: Object.keys(catCounts).map(k => k.charAt(0).toUpperCase()+k.slice(1)), datasets:[{ data: Object.values(catCounts), backgroundColor: catColors, borderWidth:0, hoverOffset:8 }] },
+      options: { responsive:true, maintainAspectRatio:true, cutout:'65%', plugins:{ legend:{ position:'bottom', labels:{ padding:12, font:{ size:11 } } } } }
+    });
+  }
+
+  // Hour distribution chart
+  const hourCanvas = document.getElementById('hourChart');
+  if (hourCanvas) {
+    const hc = {};
+    for (let h = 7; h <= 20; h++) hc[h] = 0;
+    [...meetings, ...recurring].forEach(m => { if (m.time) { const h = parseInt(m.time.split(':')[0]); if (hc[h] !== undefined) hc[h]++; } });
+    const existingHourChart = Chart.getChart(hourCanvas);
+    if (existingHourChart) existingHourChart.destroy();
+    new Chart(hourCanvas, {
+      type: 'bar',
+      data: { labels: Object.keys(hc).map(h => (h>12?h-12:h)+(h>=12?'pm':'am')), datasets:[{ label:'Meetings', data:Object.values(hc), backgroundColor:'rgba(34,211,160,0.7)', borderRadius:5, borderSkipped:false }] },
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ stepSize:1 } } } }
+    });
+  }
+
+  // Busiest day
+  const busiestEntry = Object.entries(wc).sort((a,b) => b[1]-a[1])[0];
+  const busiestEl = document.getElementById('busiestDay');
+  if (busiestEl) busiestEl.innerText = busiestEntry && busiestEntry[1] > 0 ? busiestEntry[0] : '—';
+
+  // Avg per week & this week count
+  const allDates = meetings.map(m => m.date).sort();
+  const avgWeekEl = document.getElementById('avgWeek');
+  if (avgWeekEl && allDates.length >= 2) {
+    const firstDate = new Date(allDates[0]+'T12:00:00');
+    const lastDate  = new Date(allDates[allDates.length-1]+'T12:00:00');
+    const weeks = Math.max(1, Math.ceil((lastDate - firstDate) / (7*24*60*60*1000)));
+    avgWeekEl.innerText = (meetings.length / weeks).toFixed(1);
+  } else if (avgWeekEl) { avgWeekEl.innerText = meetings.length; }
+
+  const thisWeekEl = document.getElementById('thisWeekCount');
+  if (thisWeekEl) {
+    const now = new Date();
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
+    const weekStartStr = weekStart.toISOString().slice(0,10);
+    const weekEndStr   = new Date(weekStart.getTime() + 6*24*60*60*1000).toISOString().slice(0,10);
+    thisWeekEl.innerText = meetings.filter(m => m.date >= weekStartStr && m.date <= weekEndStr).length;
+  }
 }
 
 /* ============================================================
@@ -1443,28 +1512,22 @@ async function processAI() {
 
 /* ============================================================
    GROQ API INTEGRATION
-   All user messages go directly to Groq with full app context.
-   Groq responds in HTML and can embed <action> JSON tags to
-   control the app (navigate, create, delete, join, reschedule).
+   Groq receives full app context on every message and responds
+   with an <actions> JSON array. aiExecuteActions() runs each
+   action directly against Supabase — no buttons, no confirms.
 ============================================================ */
 
-function getGrokApiKey() {
-  return localStorage.getItem('groqApiKey') || '';
-}
-
-function saveGrokApiKey(key) {
-  localStorage.setItem('groqApiKey', key.trim());
-}
+function getGrokApiKey()    { return localStorage.getItem('groqApiKey') || ''; }
+function saveGrokApiKey(k)  { localStorage.setItem('groqApiKey', k.trim()); }
 
 function toggleGrokKeyPanel() {
   const panel = document.getElementById('grokKeyPanel');
   if (!panel) return;
-  const isOpen = panel.style.display !== 'none';
-  panel.style.display = isOpen ? 'none' : 'flex';
-  if (!isOpen) {
-    const input = document.getElementById('grokKeyInput');
-    if (input) input.value = getGrokApiKey();
-    setTimeout(() => input?.focus(), 50);
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'flex';
+  if (!open) {
+    const inp = document.getElementById('grokKeyInput');
+    if (inp) { inp.value = getGrokApiKey(); setTimeout(() => inp.focus(), 50); }
   }
 }
 
@@ -1476,11 +1539,11 @@ function applyGrokKey() {
   const btn = document.getElementById('grokKeyBtn');
   if (btn) { btn.textContent = '✅'; setTimeout(() => btn.textContent = '🔑', 2000); }
   toast('Groq API key saved! ✅', 'success');
-  const subtitle = document.getElementById('aiSubtitle');
-  if (subtitle) subtitle.textContent = 'Smart assistant · Powered by Groq ✅';
+  const sub = document.getElementById('aiSubtitle');
+  if (sub) sub.textContent = 'Smart assistant · Powered by Groq ✅';
 }
 
-// Build the full app context string sent to Groq on every message
+// ── Build full app snapshot sent to Groq on every turn ───────
 function buildGroqContext(ctx) {
   const { meetings, recurring, today, todayDay, s, userName } = ctx;
   const now    = new Date();
@@ -1491,225 +1554,280 @@ function buildGroqContext(ctx) {
   const upcoming      = meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date)).slice(0,10);
   const past          = meetings.filter(m => m.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0,5);
 
-  const startMins = (h => h[0]*60+h[1])((avail.start||'09:00').split(':').map(Number));
-  const endMins   = (h => h[0]*60+h[1])((avail.end  ||'17:00').split(':').map(Number));
+  const startMins  = (p => p[0]*60+p[1])((avail.start||'09:00').split(':').map(Number));
+  const endMins    = (p => p[0]*60+p[1])((avail.end  ||'17:00').split(':').map(Number));
   const bookedMins = todayMeetings.map(m => { const [h,mn]=m.time.split(':').map(Number); return h*60+mn; }).sort((a,b)=>a-b);
-  const freeSlots = [];
-  let cursor = startMins;
+  const freeSlots  = [];
+  let cur = startMins;
   for (const mt of bookedMins) {
-    if (mt - cursor >= 30) freeSlots.push(String(Math.floor(cursor/60)).padStart(2,'0')+':'+String(cursor%60).padStart(2,'0')+'–'+String(Math.floor(mt/60)).padStart(2,'0')+':'+String(mt%60).padStart(2,'0'));
-    cursor = mt + 30;
+    if (mt - cur >= 30) freeSlots.push(String(Math.floor(cur/60)).padStart(2,'0')+':'+String(cur%60).padStart(2,'0')+'–'+String(Math.floor(mt/60)).padStart(2,'0')+':'+String(mt%60).padStart(2,'0'));
+    cur = mt + 30;
   }
-  if (endMins - cursor >= 30) freeSlots.push(String(Math.floor(cursor/60)).padStart(2,'0')+':'+String(cursor%60).padStart(2,'0')+'–'+String(Math.floor(endMins/60)).padStart(2,'0')+':'+String(endMins%60).padStart(2,'0'));
+  if (endMins - cur >= 30) freeSlots.push(String(Math.floor(cur/60)).padStart(2,'0')+':'+String(cur%60).padStart(2,'0')+'–'+String(Math.floor(endMins/60)).padStart(2,'0')+':'+String(endMins%60).padStart(2,'0'));
 
-  const nl = '\n';
-  const fmtMeeting  = m => '  [id:'+m.id+'] "'+m.subject+'" at '+m.time+' via '+m.platform+' | code:'+(m.code||'—')+' | link:'+(m.link||buildLink(m.platform,m.code));
-  const fmtUpcoming = m => '  [id:'+m.id+'] "'+m.subject+'" on '+m.date+' at '+m.time+' via '+m.platform;
-  const fmtPast     = m => '  [id:'+m.id+'] "'+m.subject+'" on '+m.date+' at '+m.time;
-  const fmtRec      = r => '  [id:'+r.id+'] "'+r.subject+'" every '+(r.days||[]).join(',')+ ' at '+r.time+' via '+r.platform;
+  const nl  = '\n';
+  const fmt = m => '  [id:'+m.id+'] "'+m.subject+'" | '+m.date+' '+m.time+' | '+m.platform+' | code:'+(m.code||'—')+' | link:'+(m.link||buildLink(m.platform,m.code));
+  const fmr = r => '  [id:'+r.id+'] "'+r.subject+'" | every '+(r.days||[]).join(',')+ ' @ '+r.time+' | '+r.platform+' | code:'+(r.code||'—');
 
   return [
-    '=== APP STATE ===',
-    'User: '+userName,
-    'Current time: '+nowStr+' on '+today+' ('+todayDay+')',
-    'Working hours: '+(avail.start||'09:00')+'–'+(avail.end||'17:00')+' | Buffer: '+(avail.buffer||0)+'min | Max/day: '+(avail.maxPerDay||10),
+    '=== LIVE APP STATE ===',
+    'User: '+userName+' | Now: '+nowStr+' on '+today+' ('+todayDay+')',
+    'Working hours: '+(avail.start||'09:00')+'–'+(avail.end||'17:00')+' | Buffer: '+(avail.buffer||0)+'min',
     'Default platform: '+(s.defaults?.platform||'meet')+' | Default duration: '+(s.defaults?.duration||30)+'min',
     '',
-    'TODAY\'S MEETINGS ('+todayMeetings.length+'):',
-    todayMeetings.length ? todayMeetings.map(fmtMeeting).join(nl) : '  (none)',
+    'TODAY ('+todayMeetings.length+' meetings):',
+    todayMeetings.length ? todayMeetings.map(fmt).join(nl) : '  (none)',
+    'Free slots today: '+(freeSlots.join(', ')||'none'),
     '',
-    'FREE SLOTS TODAY: '+(freeSlots.length ? freeSlots.join(', ') : '(none in working hours)'),
+    'UPCOMING ('+upcoming.length+'):',
+    upcoming.length ? upcoming.map(fmt).join(nl) : '  (none)',
     '',
-    'UPCOMING MEETINGS (next 10):',
-    upcoming.length ? upcoming.map(fmtUpcoming).join(nl) : '  (none)',
+    'PAST (last 5):',
+    past.length ? past.map(m=>'  [id:'+m.id+'] "'+m.subject+'" | '+m.date+' '+m.time).join(nl) : '  (none)',
     '',
-    'RECENT PAST MEETINGS:',
-    past.length ? past.map(fmtPast).join(nl) : '  (none)',
-    '',
-    'RECURRING MEETINGS ('+recurring.length+'):',
-    recurring.length ? recurring.map(fmtRec).join(nl) : '  (none)',
+    'RECURRING ('+recurring.length+'):',
+    recurring.length ? recurring.map(fmr).join(nl) : '  (none)',
     '',
     'TOTALS: '+meetings.length+' one-time | '+recurring.length+' recurring'
   ].join(nl);
 }
 
-// Main Groq API call — called for every user message
+// ── Execute actions returned by Groq directly — no UI buttons ─
+async function aiExecuteActions(actions) {
+  for (const cmd of actions) {
+    try {
+      switch (cmd.type) {
+
+        case 'navigate': {
+          showPage(cmd.page, document.getElementById('nav-'+cmd.page));
+          break;
+        }
+
+        case 'create-meeting': {
+          if (!cmd.subject || !cmd.date || !cmd.time || !cmd.platform) {
+            aiBotMsg('⚠️ Missing fields to create meeting — need subject, date, time, platform.');
+            break;
+          }
+          const code = cmd.code || 'ai-'+Math.random().toString(36).slice(2,9);
+          const { data, error } = await sb.from('meetings').insert({
+            user_id: _currentUser.id,
+            subject: cmd.subject,
+            date:    cmd.date,
+            time:    cmd.time,
+            platform: cmd.platform,
+            code,
+            link: buildLink(cmd.platform, code),
+            notes: cmd.notes || '',
+            bot_enabled: false
+          }).select().single();
+          if (error) { aiBotMsg('❌ Could not create meeting: '+error.message); break; }
+          _meetings.push(data);
+          refreshAll();
+          toast('✅ Meeting "'+cmd.subject+'" created!', 'success');
+          break;
+        }
+
+        case 'delete-meeting': {
+          const m = _meetings.find(x => x.id === cmd.id || x.subject?.toLowerCase() === (cmd.subject||'').toLowerCase());
+          if (!m) { aiBotMsg('⚠️ Could not find meeting to delete: "'+( cmd.subject||cmd.id)+'"'); break; }
+          const { error } = await sb.from('meetings').delete().eq('id', m.id);
+          if (error) { aiBotMsg('❌ Delete failed: '+error.message); break; }
+          _meetings = _meetings.filter(x => x.id !== m.id);
+          refreshAll();
+          toast('🗑 "'+m.subject+'" deleted.', 'info');
+          break;
+        }
+
+        case 'delete-recurring': {
+          const r = _recurring.find(x => x.id === cmd.id || x.subject?.toLowerCase() === (cmd.subject||'').toLowerCase());
+          if (!r) { aiBotMsg('⚠️ Could not find recurring meeting: "'+( cmd.subject||cmd.id)+'"'); break; }
+          const { error } = await sb.from('recurring').delete().eq('id', r.id);
+          if (error) { aiBotMsg('❌ Delete failed: '+error.message); break; }
+          _recurring = _recurring.filter(x => x.id !== r.id);
+          refreshAll();
+          toast('🗑 Recurring "'+r.subject+'" deleted.', 'info');
+          break;
+        }
+
+        case 'reschedule-meeting': {
+          const m = _meetings.find(x => x.id === cmd.id || x.subject?.toLowerCase() === (cmd.subject||'').toLowerCase());
+          if (!m) { aiBotMsg('⚠️ Could not find meeting to reschedule: "'+( cmd.subject||cmd.id)+'"'); break; }
+          const updates = {};
+          if (cmd.date) updates.date = cmd.date;
+          if (cmd.time) updates.time = cmd.time;
+          const { data, error } = await sb.from('meetings').update(updates).eq('id', m.id).select().single();
+          if (error) { aiBotMsg('❌ Reschedule failed: '+error.message); break; }
+          _meetings = _meetings.map(x => x.id === m.id ? data : x);
+          refreshAll();
+          toast('📅 "'+m.subject+'" rescheduled.', 'success');
+          break;
+        }
+
+        case 'create-recurring': {
+          if (!cmd.subject || !cmd.time || !cmd.days?.length || !cmd.platform) {
+            aiBotMsg('⚠️ Need subject, time, days array, and platform to create recurring meeting.');
+            break;
+          }
+          const code = cmd.code || 'ai-'+Math.random().toString(36).slice(2,9);
+          const { data, error } = await sb.from('recurring').insert({
+            user_id: _currentUser.id,
+            subject: cmd.subject,
+            time:    cmd.time,
+            days:    cmd.days,
+            platform: cmd.platform,
+            code
+          }).select().single();
+          if (error) { aiBotMsg('❌ Could not create recurring meeting: '+error.message); break; }
+          _recurring.push(data);
+          refreshAll();
+          toast('🔄 Recurring "'+cmd.subject+'" created!', 'success');
+          break;
+        }
+
+        case 'join-meeting': {
+          const link = cmd.link || (cmd.id ? (()=>{ const m = [..._meetings,..._recurring].find(x=>x.id===cmd.id); return m ? (m.link||buildLink(m.platform,m.code)) : null; })() : null);
+          if (link) window.open(link, '_blank');
+          else aiBotMsg('⚠️ Could not find a link for that meeting.');
+          break;
+        }
+
+        case 'open-settings': {
+          showPage('settings', document.getElementById('nav-settings'));
+          if (cmd.tab) setTimeout(() => loadSettings(cmd.tab, document.querySelector('.settings-tab[onclick*="'+cmd.tab+'"]')), 200);
+          break;
+        }
+
+      }
+    } catch(e) {
+      console.error('aiExecuteActions error for', cmd, e);
+    }
+  }
+}
+
+// ── Main Groq call ────────────────────────────────────────────
 async function processWithGroq(userInput, ctx) {
   const apiKey = getGrokApiKey();
 
   if (!apiKey) {
     aiBotMsg(
-      `🔑 <strong>Groq API key not set.</strong><br>Click the <strong>🔑</strong> button above, paste your key, and hit Save — then I can fully control the app!`,
+      '🔑 <strong>Groq API key not set.</strong><br>Click the <strong>🔑</strong> button above to add your key — then I can do everything for you automatically!',
       [{ label: '🔑 Add API Key', fn: () => toggleGrokKeyPanel() }]
     );
     return;
   }
 
   const contextSummary = buildGroqContext(ctx);
+  const today = ctx.today;
 
-  const systemPrompt = `You are MeetSync AI — an intelligent assistant fully embedded in the MeetSync meeting scheduler app. You have complete read/write access to the user's calendar and can perform any app action.
+  const systemPrompt = `You are MeetSync AI — an autonomous AI assistant fully embedded in the MeetSync scheduling app. You have DIRECT write access to the user's calendar and can execute any action immediately without asking for confirmation.
 
 ${contextSummary}
 
-=== YOUR CAPABILITIES ===
-You can do ALL of the following by embedding ONE <action> JSON block anywhere in your response:
+=== ACTIONS YOU CAN EXECUTE ===
+Return a JSON array in <actions>[...]</actions> tags. You can include MULTIPLE actions at once.
 
-NAVIGATION:
-  <action>{"type":"navigate","page":"dashboard"}</action>
-  <action>{"type":"navigate","page":"meetings"}</action>
-  <action>{"type":"navigate","page":"analytics"}</action>
-  <action>{"type":"navigate","page":"calendarPage"}</action>
-  <action>{"type":"navigate","page":"settings"}</action>
+CREATE a one-time meeting:
+{"type":"create-meeting","subject":"Team Standup","date":"${today}","time":"10:00","platform":"meet","code":"abc-defg-hij","notes":"optional"}
+Platforms: "meet", "zoom", "jitsi"
+If the user doesn't give a meeting code, GENERATE a random one like "xyz-abcd-efg".
+If the user doesn't specify a platform, use the default: ${ctx.s.defaults?.platform||'meet'}.
 
-MEETING MANAGEMENT:
-  <action>{"type":"open-new-meeting"}</action>
-  <action>{"type":"prefill-meeting","subject":"Team Standup","date":"2026-04-05","time":"10:00","platform":"meet"}</action>
-  <action>{"type":"join-meeting","link":"https://meet.google.com/abc-defg-hij"}</action>
-  <action>{"type":"delete-meeting","id":"<meeting-id-from-context>"}</action>
-  <action>{"type":"reschedule-meeting","id":"<meeting-id>","date":"2026-04-06","time":"14:00"}</action>
+CREATE a recurring meeting:
+{"type":"create-recurring","subject":"Weekly Sync","time":"09:00","days":["Mon","Wed","Fri"],"platform":"meet","code":"abc-defg"}
+Days array values: "Mon","Tue","Wed","Thu","Fri","Sat","Sun"
 
-SETTINGS:
-  <action>{"type":"open-settings","tab":"profile"}</action>
-  <action>{"type":"open-settings","tab":"notifications"}</action>
-  <action>{"type":"open-settings","tab":"appearance"}</action>
-  <action>{"type":"open-settings","tab":"availability"}</action>
-  <action>{"type":"open-settings","tab":"security"}</action>
+DELETE a one-time meeting:
+{"type":"delete-meeting","id":"exact-id-from-context"}
 
-=== RESPONSE RULES ===
-1. ALWAYS respond in HTML — use <strong>, <em>, <br> for formatting. Never use markdown.
-2. Use the exact meeting IDs from the context when referencing meetings in actions.
-3. For scheduling: always check for conflicts with existing meetings at the same time/date. Warn the user if a conflict exists.
-4. For "join": construct the join link from platform + code (meet→https://meet.google.com/{code}, zoom→https://zoom.us/j/{code}, jitsi→https://meet.jit.si/{code}).
-5. Be concise and actionable. Lead with the answer, then add the action button.
-6. Address the user by their name: ${ctx.userName}.
-7. If you cannot find a specific meeting the user refers to, list the closest matches from context.
-8. You can handle complex queries: "schedule a meeting tomorrow at 3pm on Zoom called Roadmap Review", "what's my busiest day this week", "join my next meeting", "am I free at 2pm today", "delete my Friday standup", etc.`;
+DELETE a recurring meeting:
+{"type":"delete-recurring","id":"exact-id-from-context"}
 
-  const conversationHistory = _aiHistory.slice(-6).map(h => ({
+RESCHEDULE a meeting:
+{"type":"reschedule-meeting","id":"exact-id-from-context","date":"2026-04-10","time":"15:00"}
+
+JOIN a meeting (opens the link):
+{"type":"join-meeting","id":"exact-id-from-context"}
+
+NAVIGATE to a page:
+{"type":"navigate","page":"dashboard"} — pages: dashboard, meetings, analytics, calendarPage, settings
+
+OPEN a settings tab:
+{"type":"open-settings","tab":"profile"} — tabs: profile, notifications, appearance, availability, security
+
+=== RULES ===
+1. ALWAYS execute the action immediately. Never say "I'll open the form" or "click here" — just do it.
+2. Respond in plain HTML using <strong>, <em>, <br>. No markdown.
+3. Use EXACT meeting IDs from the context above when referencing existing meetings.
+4. For dates: today is ${today}. Calculate future dates correctly (tomorrow, next Monday, etc).
+5. Check for time conflicts before scheduling — warn in your message if one exists but still create unless user explicitly said not to.
+6. For "join my next meeting" — find the soonest upcoming meeting and join it.
+7. For "delete all X meetings" — emit multiple delete actions.
+8. Keep replies SHORT and action-focused. Confirm what you did, not what you're about to do.
+9. Address the user as ${ctx.userName}.
+10. If you need info you don't have (like a meeting subject), ask ONE focused question. Otherwise just act.`;
+
+  const history = (_aiHistory||[]).slice(-8).map(h => ({
     role: h.role === 'bot' ? 'assistant' : 'user',
-    content: h.text
+    content: h.text.replace(/<[^>]+>/g,'')
   }));
 
   aiShowTyping();
 
   try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+apiKey },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemPrompt },
-          ...conversationHistory,
+          ...history,
           { role: 'user', content: userInput }
         ],
-        max_tokens: 800,
-        temperature: 0.5
+        max_tokens: 900,
+        temperature: 0.3
       })
     });
 
     aiHideTyping();
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      const msg = err?.error?.message || `HTTP ${response.status}`;
-      if (response.status === 401) {
-        aiBotMsg(`❌ <strong>Invalid Groq API key.</strong> Please update it.`,
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({}));
+      const msg = err?.error?.message || 'HTTP '+resp.status;
+      if (resp.status === 401) {
+        aiBotMsg('❌ <strong>Invalid Groq API key.</strong> Please update it.',
           [{ label: '🔑 Update Key', fn: () => toggleGrokKeyPanel() }]);
       } else {
-        aiBotMsg(`❌ Groq API error: ${msg}`);
+        aiBotMsg('❌ Groq error: '+msg);
       }
       return;
     }
 
-    const data   = await response.json();
-    const rawReply = data.choices?.[0]?.message?.content || '';
+    const data      = await resp.json();
+    const rawReply  = data.choices?.[0]?.message?.content || '';
 
-    // Strip <action> tags from displayed text, execute the command
-    const actionMatch  = rawReply.match(/<action>([\s\S]*?)<\/action>/);
-    const displayReply = rawReply.replace(/<action>[\s\S]*?<\/action>/g, '').trim() || '✅ Done!';
-    const actionBtns   = [];
+    // Parse <actions>[...]</actions> block
+    const actionsMatch = rawReply.match(/<actions>([\s\S]*?)<\/actions>/);
+    const displayText  = rawReply.replace(/<actions>[\s\S]*?<\/actions>/g,'').trim() || '✅ Done!';
 
-    if (actionMatch) {
+    // Show the reply first
+    aiBotMsg(displayText);
+
+    // Then execute all actions silently
+    if (actionsMatch) {
       try {
-        const cmd = JSON.parse(actionMatch[1].trim());
-
-        switch (cmd.type) {
-          case 'navigate':
-            actionBtns.push({
-              label: `📍 Go to ${cmd.page}`,
-              fn: () => aiAction('navigate', { page: cmd.page })
-            });
-            break;
-
-          case 'open-new-meeting':
-            actionBtns.push({ label: '➕ Open form', fn: () => aiAction('open-new-meeting') });
-            break;
-
-          case 'prefill-meeting':
-            actionBtns.push({
-              label: `➕ Create "${cmd.subject || 'Meeting'}"`,
-              fn: () => aiAction('prefill-meeting', {
-                subject: cmd.subject, date: cmd.date, time: cmd.time, platform: cmd.platform
-              })
-            });
-            break;
-
-          case 'join-meeting':
-            if (cmd.link) actionBtns.push({
-              label: '▶ Join now',
-              fn: () => aiAction('join-meeting', { link: cmd.link })
-            });
-            break;
-
-          case 'delete-meeting': {
-            const target = getMeetings().find(m => m.id === cmd.id)
-                        || getRecurring().find(r => r.id === cmd.id);
-            if (target) {
-              actionBtns.push({
-                label: `🗑 Delete "${target.subject}"`,
-                fn: () => {
-                  target.days ? deleteRecurring(target.id) : deleteMeeting(target.id);
-                  aiBotMsg(`✅ <strong>${target.subject}</strong> deleted.`);
-                }
-              });
-              actionBtns.push({ label: 'Cancel', fn: () => aiBotMsg('👍 Kept it!') });
-            }
-            break;
-          }
-
-          case 'reschedule-meeting': {
-            const target = getMeetings().find(m => m.id === cmd.id);
-            if (target) {
-              actionBtns.push({
-                label: `📅 Reschedule "${target.subject}"`,
-                fn: () => rescheduleViaAI(target, cmd.date || null, cmd.time || null)
-              });
-              actionBtns.push({ label: 'Cancel', fn: () => aiBotMsg('👍 Not rescheduled.') });
-            }
-            break;
-          }
-
-          case 'open-settings':
-            actionBtns.push({
-              label: '⚙️ Open settings',
-              fn: () => aiAction('open-settings', { tab: cmd.tab || 'profile' })
-            });
-            break;
+        const actions = JSON.parse(actionsMatch[1].trim());
+        if (Array.isArray(actions) && actions.length > 0) {
+          await aiExecuteActions(actions);
         }
-      } catch (e) {
-        console.warn('Groq action parse error:', e, actionMatch[1]);
+      } catch(e) {
+        console.warn('Groq actions parse error:', e, actionsMatch[1]);
       }
     }
 
-    aiBotMsg(displayReply, actionBtns);
-
-  } catch (e) {
+  } catch(e) {
     aiHideTyping();
-    aiBotMsg(`❌ Could not reach Groq. Check your connection or API key.<br><em>${e.message}</em>`);
+    aiBotMsg('❌ Could not reach Groq. Check your connection.<br><em>'+e.message+'</em>');
   }
 }
 
@@ -2181,6 +2299,7 @@ window.openModal           = openModal;
 window.closeModal          = closeModal;
 window.addMeeting          = addMeeting;
 window.loadMeetings        = loadMeetings;
+window.setCatFilter        = setCatFilter;
 window.openEditModal       = openEditModal;
 window.updateMeeting       = updateMeeting;
 window.deleteMeeting       = deleteMeeting;
