@@ -435,40 +435,6 @@ function showPage(id, btn) {
 /* ============================================================
    MEETINGS CRUD
 ============================================================ */
-
-/* ============================================================
-   CATEGORIES
-============================================================ */
-const CAT_LABELS = {
-  work:      '💼 Work',
-  personal:  '👤 Personal',
-  family:    '👨‍👩‍👧 Family',
-  client:    '🤝 Client',
-  interview: '🎯 Interview',
-  education: '📚 Education',
-  other:     '📌 Other',
-};
-
-let _catFilter = 'all';
-
-function pickCat(btn, pickerId, inputId) {
-  document.querySelectorAll(`#${pickerId} .cat-btn`).forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById(inputId).value = btn.dataset.cat;
-}
-
-function setCatFilter(cat, btn) {
-  _catFilter = cat;
-  document.querySelectorAll('.cat-filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadMeetings();
-}
-
-function catBadge(cat) {
-  if (!cat) return '';
-  return `<span class="meeting-badge badge-cat badge-cat-${cat}">${CAT_LABELS[cat] || cat}</span>`;
-}
-
 async function addMeeting() {
   const subject  = document.getElementById('subject').value.trim();
   const date     = document.getElementById('date').value;
@@ -477,13 +443,12 @@ async function addMeeting() {
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
   const botEnabled = document.getElementById('botEnabled').checked;
-  const category   = document.getElementById('category').value || 'work';
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes, bot_enabled: botEnabled, category
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -492,8 +457,6 @@ async function addMeeting() {
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
   document.getElementById('botEnabled').checked = false;
-  document.getElementById('category').value = 'work';
-  document.querySelectorAll('#catPicker .cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'work'));
   refreshAll();
   toast('Meeting scheduled!', 'success');
 }
@@ -507,8 +470,7 @@ function loadMeetings() {
   let count = 0;
 
   meetings.forEach(m => {
-    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query) && !(m.category||'').includes(query)) return;
-    if (_catFilter !== 'all' && (m.category || 'work') !== _catFilter) return;
+    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
     count++;
     list.innerHTML += `
       <div class="meeting-card">
@@ -519,7 +481,6 @@ function loadMeetings() {
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
             ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
-            ${catBadge(m.category)}
           </div>
         </div>
         <div class="meeting-actions">
@@ -571,9 +532,6 @@ function openEditModal(id) {
   document.getElementById('editCode').value         = m.code;
   document.getElementById('editIndex').value        = id;
   document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
-  const ec = m.category || 'work';
-  document.getElementById('editCategory').value = ec;
-  document.querySelectorAll('#editCatPicker .cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === ec));
   openModal('editModal');
 }
 
@@ -586,8 +544,7 @@ async function updateMeeting() {
     date:        document.getElementById('editDate').value,
     time:        document.getElementById('editTime').value,
     platform, code, link: buildLink(platform, code),
-    bot_enabled: document.getElementById('editBotEnabled').checked,
-    category:    document.getElementById('editCategory').value || 'work'
+    bot_enabled: document.getElementById('editBotEnabled').checked
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -1895,6 +1852,388 @@ async function rescheduleViaAI(m, newDate, newTime) {
   }
 }
 
+
+/* ============================================================
+   NOVELTY FEATURES
+   1. Meeting Load Score
+   2. Smart Focus Block Finder
+   3. Pre-meeting Brief + Countdown
+   4. Weekly Category Budget
+   5. Meeting Heatmap
+   6. Smart Decline Suggestions
+   7. Conflict Detector
+   8. Meeting Streak Tracker
+============================================================ */
+
+// ── 1. MEETING LOAD SCORE ────────────────────────────────────
+// Scores today's meeting density 0-100, colour-coded
+function updateLoadScore() {
+  const today    = localToday();
+  const todayDay = new Date().toLocaleString('default', { weekday: 'short' });
+  const meetings = getMeetings();
+  const recurring = getRecurring();
+
+  const todayMeetings = [
+    ...meetings.filter(m => m.date === today),
+    ...recurring.filter(r => r.days?.includes(todayDay))
+  ];
+
+  const totalMins = todayMeetings.reduce((acc, m) => acc + (m.duration || 30), 0);
+  const score     = Math.min(100, Math.round((totalMins / 240) * 100)); // 4hrs = 100%
+  const count     = todayMeetings.length;
+
+  const bar   = document.getElementById('loadBar');
+  const badge = document.getElementById('loadBadge');
+  const sub   = document.getElementById('loadSub');
+  if (!bar) return;
+
+  bar.style.width = score + '%';
+
+  let color, label, msg;
+  if (score === 0)      { color = '#4ade80'; label = 'Free';     msg = 'No meetings today 🎉'; }
+  else if (score < 30)  { color = '#4ade80'; label = 'Light';    msg = `${count} meeting${count>1?'s':''} — plenty of focus time`; }
+  else if (score < 60)  { color = '#facc15'; label = 'Moderate'; msg = `${count} meetings — manageable day`; }
+  else if (score < 85)  { color = '#fb923c'; label = 'Heavy';    msg = `${count} meetings — plan your energy!`; }
+  else                  { color = '#ef4444'; label = 'Overloaded'; msg = `${count} meetings — consider rescheduling some`; }
+
+  bar.style.background  = color;
+  badge.textContent     = label;
+  badge.style.background = color + '22';
+  badge.style.color      = color;
+  sub.textContent        = msg;
+}
+
+// ── 2. SMART FOCUS BLOCK FINDER ──────────────────────────────
+// Finds the longest free gap today
+function updateFocusBlock() {
+  const today    = localToday();
+  const todayDay = new Date().toLocaleString('default', { weekday: 'short' });
+  const meetings = getMeetings();
+  const recurring = getRecurring();
+
+  const todayMeetings = [
+    ...meetings.filter(m => m.date === today),
+    ...recurring.filter(r => r.days?.includes(todayDay))
+  ].map(m => ({
+    start: timeToMins(m.time),
+    end:   timeToMins(m.time) + (m.duration || 30)
+  })).sort((a, b) => a.start - b.start);
+
+  const blockEl = document.getElementById('focusBlock');
+  const subEl   = document.getElementById('focusSub');
+  if (!blockEl) return;
+
+  // Working hours: 8am to 8pm
+  const workStart = 8 * 60;
+  const workEnd   = 20 * 60;
+
+  let bestStart = workStart, bestEnd = workEnd, bestDur = 0;
+  let cursor = workStart;
+
+  for (const m of todayMeetings) {
+    if (m.start > cursor) {
+      const dur = m.start - cursor;
+      if (dur > bestDur) { bestDur = dur; bestStart = cursor; bestEnd = m.start; }
+    }
+    cursor = Math.max(cursor, m.end);
+  }
+  // Check after last meeting
+  if (workEnd > cursor) {
+    const dur = workEnd - cursor;
+    if (dur > bestDur) { bestDur = dur; bestStart = cursor; bestEnd = workEnd; }
+  }
+
+  if (bestDur === 0) {
+    blockEl.textContent = 'No free blocks today';
+    subEl.textContent   = 'Try moving some meetings';
+  } else if (bestDur >= 60) {
+    blockEl.textContent = `${minsToTime(bestStart)} — ${minsToTime(bestEnd)}`;
+    subEl.textContent   = `${Math.floor(bestDur/60)}h ${bestDur%60>0?bestDur%60+'m':''} free — perfect for deep work`;
+  } else {
+    blockEl.textContent = `${minsToTime(bestStart)} — ${minsToTime(bestEnd)}`;
+    subEl.textContent   = `${bestDur} min break`;
+  }
+}
+
+function timeToMins(hhmm) {
+  if (!hhmm) return 0;
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minsToTime(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const display = ((h % 12) || 12) + (m > 0 ? ':' + String(m).padStart(2,'0') : '');
+  return display + ' ' + suffix;
+}
+
+// ── 3. PRE-MEETING BRIEF + COUNTDOWN ─────────────────────────
+function updateBrief() {
+  const now      = new Date();
+  const today    = localToday();
+  const todayDay = now.toLocaleString('default', { weekday: 'short' });
+  const nowMins  = now.getHours() * 60 + now.getMinutes();
+  const meetings = getMeetings();
+  const recurring = getRecurring();
+
+  const upcoming = [
+    ...meetings.filter(m => m.date === today),
+    ...recurring.filter(r => r.days?.includes(todayDay)).map(r => ({ ...r, link: buildLink(r.platform, r.code) }))
+  ]
+  .map(m => ({ ...m, startMins: timeToMins(m.time) }))
+  .filter(m => m.startMins >= nowMins)
+  .sort((a, b) => a.startMins - b.startMins);
+
+  const el        = document.getElementById('briefContent');
+  const countdown = document.getElementById('briefCountdown');
+  if (!el) return;
+
+  if (!upcoming.length) {
+    el.innerHTML      = 'No more meetings today 🎉';
+    countdown.textContent = '';
+    return;
+  }
+
+  const next    = upcoming[0];
+  const diff    = next.startMins - nowMins;
+  const platMap = { meet: 'Google Meet', zoom: 'Zoom', jitsi: 'Jitsi' };
+
+  el.innerHTML = `<strong>${next.subject}</strong><br><span style="font-size:11px;color:var(--muted);">${platMap[next.platform]||next.platform} · ${next.time}</span>`;
+
+  if (diff === 0) {
+    countdown.innerHTML = '<span style="color:#ef4444;font-weight:700;">🔴 Starting now!</span>';
+  } else if (diff <= 5) {
+    countdown.innerHTML = `<span style="color:#fb923c;font-weight:600;">⚡ In ${diff} min${diff>1?'s':''}</span>`;
+  } else if (diff <= 15) {
+    countdown.innerHTML = `<span style="color:#facc15;">⏰ In ${diff} minutes</span>`;
+  } else {
+    const h = Math.floor(diff/60), m = diff%60;
+    countdown.textContent = `In ${h>0?h+'h ':''} ${m>0?m+'m':''}`;
+  }
+
+  // Auto-open join notification if meeting is starting in 2 mins
+  if (diff <= 2 && diff >= 0 && next.link && !sessionStorage.getItem('alerted_'+next.id)) {
+    sessionStorage.setItem('alerted_'+next.id, '1');
+    showToast(`⚡ "${next.subject}" starts in ${diff<=0?'NOW':diff+' min'}! <a href="${next.link}" target="_blank" style="color:#7c6cf8;text-decoration:underline;margin-left:6px;">Join →</a>`, 'info', 8000);
+  }
+}
+
+// ── 4. WEEKLY CATEGORY BUDGET ────────────────────────────────
+const WEEKLY_BUDGETS = { work: 20, personal: 5, family: 5, client: 10, interview: 3, education: 5, other: 5 };
+
+function updateBudgetBars() {
+  const container = document.getElementById('budgetBars');
+  const badge     = document.getElementById('budgetBadge');
+  if (!container) return;
+
+  const now     = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - now.getDay());
+  const weekStartStr = weekStart.toISOString().slice(0,10);
+
+  const meetings  = getMeetings().filter(m => m.date >= weekStartStr);
+  const catTotals = {};
+  meetings.forEach(m => {
+    const cat = m.category || 'work';
+    catTotals[cat] = (catTotals[cat] || 0) + (m.duration || 30) / 60;
+  });
+
+  const totalHours = Object.values(catTotals).reduce((a,b) => a+b, 0);
+  if (badge) badge.textContent = totalHours.toFixed(1) + 'h used';
+
+  const cats = ['work','client','personal','family','education','interview','other'];
+  const catColors = {
+    work:'#60a5fa', personal:'#4ade80', family:'#fb923c',
+    client:'#c084fc', interview:'#facc15', education:'#2dd4bf', other:'#9ca3af'
+  };
+  const catIcons = {
+    work:'💼', personal:'👤', family:'👨‍👩‍👧', client:'🤝',
+    interview:'🎯', education:'📚', other:'📌'
+  };
+
+  container.innerHTML = cats.map(cat => {
+    const used   = catTotals[cat] || 0;
+    const budget = WEEKLY_BUDGETS[cat] || 10;
+    const pct    = Math.min(100, (used / budget) * 100);
+    const over   = used > budget;
+    const color  = over ? '#ef4444' : catColors[cat];
+    return `
+      <div class="budget-row">
+        <span class="budget-label">${catIcons[cat]} ${cat}</span>
+        <div class="budget-bar-wrap">
+          <div class="budget-bar-fill" style="width:${pct}%;background:${color};"></div>
+        </div>
+        <span class="budget-val" style="color:${over?'#ef4444':'var(--muted)'};">${used.toFixed(1)}/${budget}h</span>
+      </div>`;
+  }).join('');
+}
+
+// ── 5. MEETING HEATMAP ────────────────────────────────────────
+function renderHeatmap() {
+  const container = document.getElementById('meetingHeatmap');
+  if (!container) return;
+
+  const meetings  = getMeetings();
+  const recurring = getRecurring();
+  const days      = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const hours     = [8,9,10,11,12,13,14,15,16,17,18,19,20];
+
+  // Count meetings per day+hour
+  const grid = {};
+  days.forEach(d => { grid[d] = {}; hours.forEach(h => { grid[d][h] = 0; }); });
+
+  meetings.forEach(m => {
+    if (!m.date || !m.time) return;
+    const d   = new Date(m.date).toLocaleString('default', { weekday: 'short' });
+    const h   = parseInt(m.time.split(':')[0]);
+    if (grid[d] && grid[d][h] !== undefined) grid[d][h]++;
+  });
+
+  recurring.forEach(r => {
+    if (!r.days || !r.time) return;
+    const h = parseInt(r.time.split(':')[0]);
+    r.days.forEach(d => {
+      if (grid[d] && grid[d][h] !== undefined) grid[d][h]++;
+    });
+  });
+
+  const max = Math.max(1, ...days.flatMap(d => hours.map(h => grid[d][h])));
+
+  container.innerHTML = `
+    <div class="heatmap-labels-row">
+      <div class="heatmap-corner"></div>
+      ${days.map(d => `<div class="heatmap-day-label">${d}</div>`).join('')}
+    </div>
+    ${hours.map(h => `
+      <div class="heatmap-row">
+        <div class="heatmap-hour-label">${minsToTime(h*60)}</div>
+        ${days.map(d => {
+          const count = grid[d][h];
+          const opacity = count === 0 ? 0.05 : 0.15 + (count/max)*0.85;
+          const bg = count === 0 ? 'rgba(255,255,255,0.04)' : `rgba(124,108,248,${opacity})`;
+          return `<div class="heatmap-cell" title="${d} ${minsToTime(h*60)}: ${count} meeting${count!==1?'s':''}" style="background:${bg};">${count > 0 ? count : ''}</div>`;
+        }).join('')}
+      </div>`).join('')}`;
+}
+
+// ── 6. SMART DECLINE SUGGESTIONS ─────────────────────────────
+function updateSmartSuggestions() {
+  const container = document.getElementById('smartSuggestions');
+  if (!container) return;
+
+  const meetings  = getMeetings();
+  const recurring = getRecurring();
+  const today     = localToday();
+  const todayDay  = new Date().toLocaleString('default', { weekday: 'short' });
+  const suggestions = [];
+
+  // Detect overloaded days
+  const dayCount = {};
+  meetings.forEach(m => {
+    dayCount[m.date] = (dayCount[m.date] || 0) + 1;
+  });
+  const overloaded = Object.entries(dayCount).filter(([d, c]) => c >= 5 && d >= today);
+  overloaded.forEach(([d, c]) => {
+    suggestions.push({ icon:'⚠️', type:'warning', text:`<strong>${d}</strong> has ${c} meetings — consider rescheduling some for better focus.` });
+  });
+
+  // Detect back-to-back meetings
+  const todayMeets = meetings.filter(m => m.date === today).sort((a,b) => a.time.localeCompare(b.time));
+  for (let i = 0; i < todayMeets.length - 1; i++) {
+    const endA  = timeToMins(todayMeets[i].time) + (todayMeets[i].duration || 30);
+    const startB = timeToMins(todayMeets[i+1].time);
+    if (startB - endA < 5) {
+      suggestions.push({ icon:'🔴', type:'error', text:`Back-to-back: <strong>${todayMeets[i].subject}</strong> flows directly into <strong>${todayMeets[i+1].subject}</strong> — add a buffer!` });
+    }
+  }
+
+  // Detect duplicate meeting names
+  const subjects = meetings.map(m => m.subject.toLowerCase());
+  const dupes = subjects.filter((s, i) => subjects.indexOf(s) !== i);
+  [...new Set(dupes)].forEach(s => {
+    suggestions.push({ icon:'🔁', type:'info', text:`You have multiple meetings named "<strong>${s}</strong>" — are they duplicates?` });
+  });
+
+  // No focus time today
+  const todayTotalMins = [...meetings.filter(m=>m.date===today), ...recurring.filter(r=>r.days?.includes(todayDay))]
+    .reduce((acc, m) => acc + (m.duration||30), 0);
+  if (todayTotalMins > 300) {
+    suggestions.push({ icon:'🧠', type:'warning', text:`You have <strong>${Math.round(todayTotalMins/60)}h</strong> of meetings today. Schedule at least one 90-min focus block!` });
+  }
+
+  // Early morning meetings
+  const earlyMeetings = meetings.filter(m => m.date >= today && timeToMins(m.time) < 8*60);
+  if (earlyMeetings.length > 0) {
+    suggestions.push({ icon:'🌅', type:'info', text:`You have <strong>${earlyMeetings.length}</strong> meeting${earlyMeetings.length>1?'s':''} before 8 AM — consider if these are necessary.` });
+  }
+
+  // Weekend meetings
+  const weekendMeets = meetings.filter(m => {
+    const day = new Date(m.date).getDay();
+    return (day === 0 || day === 6) && m.date >= today;
+  });
+  if (weekendMeets.length > 0) {
+    suggestions.push({ icon:'🏖️', type:'warning', text:`You have <strong>${weekendMeets.length}</strong> weekend meeting${weekendMeets.length>1?'s':''}. Protect your personal time!` });
+  }
+
+  if (suggestions.length === 0) {
+    suggestions.push({ icon:'✅', type:'success', text:'Your schedule looks healthy! No issues detected.' });
+  }
+
+  const typeColors = { warning:'#fb923c', error:'#ef4444', info:'#60a5fa', success:'#4ade80' };
+  container.innerHTML = suggestions.map(s => `
+    <div class="suggestion-item" style="border-left:3px solid ${typeColors[s.type]||'#666'};">
+      <span class="suggestion-icon">${s.icon}</span>
+      <span class="suggestion-text">${s.text}</span>
+    </div>`).join('');
+}
+
+// ── 7. MEETING STREAK TRACKER ─────────────────────────────────
+// Tracks consecutive days with meetings (shows in dashboard)
+function getMeetingStreak() {
+  const meetings = getMeetings();
+  if (!meetings.length) return 0;
+
+  const dates = [...new Set(meetings.map(m => m.date))].sort().reverse();
+  let streak = 0;
+  let check  = new Date();
+
+  for (let i = 0; i < 30; i++) {
+    const dateStr = check.toISOString().slice(0,10);
+    if (dates.includes(dateStr)) {
+      streak++;
+    } else if (streak > 0) {
+      break;
+    }
+    check.setDate(check.getDate() - 1);
+  }
+  return streak;
+}
+
+// ── MASTER UPDATE — call all novelty features ─────────────────
+function updateNoveltyFeatures() {
+  updateLoadScore();
+  updateFocusBlock();
+  updateBrief();
+  updateBudgetBars();
+  renderHeatmap();
+  updateSmartSuggestions();
+}
+
+// Show toast with custom duration
+function showToast(msg, type, duration) {
+  // Use existing toast if available, otherwise create a basic one
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type || 'info'}`;
+  toast.innerHTML = msg;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), duration || 4000);
+}
+
 /* ============================================================
    CORE
 ============================================================ */
@@ -1902,11 +2241,13 @@ function refreshAll() {
   loadMeetings();
   renderCalendar();
   updateDashboardStats();
+  updateNoveltyFeatures();
 }
 
 function initApp() {
   const s = getSettings();
   applySettingsToUI(s);
+  setTimeout(updateNoveltyFeatures, 500);
 
   // Restore sidebar collapsed state
   if (localStorage.getItem('sidebarCollapsed') === 'true') {
@@ -1984,8 +2325,8 @@ window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
 window.toggleBotEnabled       = toggleBotEnabled;
-window.pickCat                = pickCat;
-window.setCatFilter           = setCatFilter;
+window.updateNoveltyFeatures  = updateNoveltyFeatures;
+window.updateSmartSuggestions = updateSmartSuggestions;
 
 /* ============================================================
    BOOTSTRAP
@@ -1995,6 +2336,7 @@ window.onload = async function () {
   document.querySelector('.shell').style.display = 'none';
 
   setInterval(updateClock, 1000);
+  setInterval(updateBrief, 60000);
   updateClock();
   document.getElementById('resetWrap').style.display = 'block';
 

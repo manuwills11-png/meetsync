@@ -156,6 +156,65 @@
           <div class="stat-card c-amber"><div class="stat-icon">📅</div><div class="stat-label">Today</div><div class="stat-value" id="statToday">0</div><div class="stat-sub">Scheduled today</div></div>
           <div class="stat-card c-red"><div class="stat-icon">⏰</div><div class="stat-label">Live Clock</div><div class="stat-value stat-clock" id="liveClock">--:--</div><div class="stat-sub" id="liveDate"></div></div>
         </div>
+        <!-- NOVELTY ROW 1: Load Score + Focus Finder + Pre-meeting Brief -->
+        <div class="novelty-row">
+
+          <!-- Meeting Load Score -->
+          <div class="novelty-card" id="loadScoreCard">
+            <div class="novelty-card-header">
+              <span class="novelty-icon">🔥</span>
+              <span class="novelty-title">Today's Load</span>
+              <span class="novelty-badge" id="loadBadge">—</span>
+            </div>
+            <div class="load-bar-wrap">
+              <div class="load-bar" id="loadBar"></div>
+            </div>
+            <div class="novelty-sub" id="loadSub">Calculating...</div>
+          </div>
+
+          <!-- Smart Focus Finder -->
+          <div class="novelty-card" id="focusCard">
+            <div class="novelty-card-header">
+              <span class="novelty-icon">🎯</span>
+              <span class="novelty-title">Best Focus Block</span>
+            </div>
+            <div class="focus-block" id="focusBlock">Finding your free time...</div>
+            <div class="novelty-sub" id="focusSub"></div>
+          </div>
+
+          <!-- Pre-meeting Brief -->
+          <div class="novelty-card" id="briefCard">
+            <div class="novelty-card-header">
+              <span class="novelty-icon">⚡</span>
+              <span class="novelty-title">Next Up</span>
+            </div>
+            <div class="brief-content" id="briefContent">No upcoming meetings</div>
+            <div class="brief-countdown" id="briefCountdown"></div>
+          </div>
+
+          <!-- Weekly Budget Meter -->
+          <div class="novelty-card" id="budgetCard">
+            <div class="novelty-card-header">
+              <span class="novelty-icon">📊</span>
+              <span class="novelty-title">Weekly Budget</span>
+              <span class="novelty-badge" id="budgetBadge">0h used</span>
+            </div>
+            <div class="budget-bars" id="budgetBars"></div>
+          </div>
+
+        </div>
+
+        <!-- NOVELTY ROW 2: Meeting Heatmap -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">🗓️ Meeting Heatmap</span>
+            <span style="font-size:11px;color:var(--muted);">Darker = more meetings</span>
+          </div>
+          <div class="panel-body">
+            <div id="meetingHeatmap" class="heatmap-grid"></div>
+          </div>
+        </div>
+
         <div class="dash-grid">
           <div class="panel">
             <div class="panel-header"><span class="panel-title">🔔 Today's Schedule</span></div>
@@ -209,18 +268,8 @@
         <div class="search-row">
           <div class="search-wrap">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" placeholder="Search by subject, platform, category..." oninput="loadMeetings()">
+            <input type="text" id="searchInput" placeholder="Search by subject, platform..." oninput="loadMeetings()">
           </div>
-        </div>
-        <div class="cat-filter-bar">
-          <button class="cat-filter-btn active" data-cat="all"       onclick="setCatFilter('all',this)">All</button>
-          <button class="cat-filter-btn"        data-cat="work"      onclick="setCatFilter('work',this)">💼 Work</button>
-          <button class="cat-filter-btn"        data-cat="personal"  onclick="setCatFilter('personal',this)">👤 Personal</button>
-          <button class="cat-filter-btn"        data-cat="family"    onclick="setCatFilter('family',this)">👨‍👩‍👧 Family</button>
-          <button class="cat-filter-btn"        data-cat="client"    onclick="setCatFilter('client',this)">🤝 Client</button>
-          <button class="cat-filter-btn"        data-cat="interview" onclick="setCatFilter('interview',this)">🎯 Interview</button>
-          <button class="cat-filter-btn"        data-cat="education" onclick="setCatFilter('education',this)">📚 Education</button>
-          <button class="cat-filter-btn"        data-cat="other"     onclick="setCatFilter('other',this)">📌 Other</button>
         </div>
         <div id="meetingList"></div>
       </div>
@@ -234,10 +283,20 @@
           <div class="analytics-kpi"><div class="kpi-label">Total Meetings</div><div class="kpi-value" id="totalMeetingsStat">0</div></div>
           <div class="analytics-kpi"><div class="kpi-label">Recurring Series</div><div class="kpi-value" id="recurringStat">0</div></div>
           <div class="analytics-kpi"><div class="kpi-label">Today's Count</div><div class="kpi-value" id="todayStat">0</div></div>
+          <div class="analytics-kpi"><div class="kpi-label">Busiest Day</div><div class="kpi-value" id="busiestDay">—</div></div>
+          <div class="analytics-kpi"><div class="kpi-label">Avg/Week</div><div class="kpi-value" id="avgWeek">0</div></div>
+          <div class="analytics-kpi"><div class="kpi-label">This Week</div><div class="kpi-value" id="thisWeekCount">0</div></div>
         </div>
         <div class="charts-grid">
           <div class="chart-panel"><h4>Platform Distribution</h4><div class="chart-wrap"><canvas id="platformChart"></canvas></div></div>
           <div class="chart-panel"><h4>Meetings by Weekday</h4><canvas id="weekdayChart"></canvas></div>
+          <div class="chart-panel"><h4>Category Breakdown</h4><div class="chart-wrap"><canvas id="categoryChart"></canvas></div></div>
+          <div class="chart-panel"><h4>Meetings by Hour</h4><canvas id="hourChart"></canvas></div>
+        </div>
+        <!-- Decline Suggestions -->
+        <div class="panel" style="margin-top:20px;">
+          <div class="panel-header"><span class="panel-title">💡 Smart Suggestions</span></div>
+          <div class="panel-body" id="smartSuggestions"><div style="color:var(--muted);font-size:13px;">Analysing your schedule...</div></div>
         </div>
       </div>
 
@@ -290,19 +349,6 @@
       <h3>📋 New Meeting</h3>
       <div class="form-grid">
         <div class="form-group full"><label class="form-label">Subject</label><input class="form-control" type="text" id="subject" placeholder="Meeting title"></div>
-        <div class="form-group full">
-          <label class="form-label">Category</label>
-          <div class="cat-picker" id="catPicker">
-            <button type="button" class="cat-btn active" data-cat="work"      onclick="pickCat(this,'catPicker','category')">💼 Work</button>
-            <button type="button" class="cat-btn"        data-cat="personal"  onclick="pickCat(this,'catPicker','category')">👤 Personal</button>
-            <button type="button" class="cat-btn"        data-cat="family"    onclick="pickCat(this,'catPicker','category')">👨‍👩‍👧 Family</button>
-            <button type="button" class="cat-btn"        data-cat="client"    onclick="pickCat(this,'catPicker','category')">🤝 Client</button>
-            <button type="button" class="cat-btn"        data-cat="interview" onclick="pickCat(this,'catPicker','category')">🎯 Interview</button>
-            <button type="button" class="cat-btn"        data-cat="education" onclick="pickCat(this,'catPicker','category')">📚 Education</button>
-            <button type="button" class="cat-btn"        data-cat="other"     onclick="pickCat(this,'catPicker','category')">📌 Other</button>
-          </div>
-          <input type="hidden" id="category" value="work">
-        </div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-control" type="date" id="date"></div>
         <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="time"></div>
         <div class="form-group"><label class="form-label">Platform</label>
@@ -337,19 +383,6 @@
       <h3>✏️ Edit Meeting</h3>
       <div class="form-grid">
         <div class="form-group full"><label class="form-label">Subject</label><input class="form-control" type="text" id="editSubject"></div>
-        <div class="form-group full">
-          <label class="form-label">Category</label>
-          <div class="cat-picker" id="editCatPicker">
-            <button type="button" class="cat-btn" data-cat="work"      onclick="pickCat(this,'editCatPicker','editCategory')">💼 Work</button>
-            <button type="button" class="cat-btn" data-cat="personal"  onclick="pickCat(this,'editCatPicker','editCategory')">👤 Personal</button>
-            <button type="button" class="cat-btn" data-cat="family"    onclick="pickCat(this,'editCatPicker','editCategory')">👨‍👩‍👧 Family</button>
-            <button type="button" class="cat-btn" data-cat="client"    onclick="pickCat(this,'editCatPicker','editCategory')">🤝 Client</button>
-            <button type="button" class="cat-btn" data-cat="interview" onclick="pickCat(this,'editCatPicker','editCategory')">🎯 Interview</button>
-            <button type="button" class="cat-btn" data-cat="education" onclick="pickCat(this,'editCatPicker','editCategory')">📚 Education</button>
-            <button type="button" class="cat-btn" data-cat="other"     onclick="pickCat(this,'editCatPicker','editCategory')">📌 Other</button>
-          </div>
-          <input type="hidden" id="editCategory" value="work">
-        </div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-control" type="date" id="editDate"></div>
         <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="editTime"></div>
         <div class="form-group"><label class="form-label">Platform</label>
