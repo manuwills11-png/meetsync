@@ -435,6 +435,40 @@ function showPage(id, btn) {
 /* ============================================================
    MEETINGS CRUD
 ============================================================ */
+
+/* ============================================================
+   CATEGORIES
+============================================================ */
+const CAT_LABELS = {
+  work:      '💼 Work',
+  personal:  '👤 Personal',
+  family:    '👨‍👩‍👧 Family',
+  client:    '🤝 Client',
+  interview: '🎯 Interview',
+  education: '📚 Education',
+  other:     '📌 Other',
+};
+
+let _catFilter = 'all';
+
+function pickCat(btn, pickerId, inputId) {
+  document.querySelectorAll(`#${pickerId} .cat-btn`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(inputId).value = btn.dataset.cat;
+}
+
+function setCatFilter(cat, btn) {
+  _catFilter = cat;
+  document.querySelectorAll('.cat-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadMeetings();
+}
+
+function catBadge(cat) {
+  if (!cat) return '';
+  return `<span class="meeting-badge badge-cat badge-cat-${cat}">${CAT_LABELS[cat] || cat}</span>`;
+}
+
 async function addMeeting() {
   const subject  = document.getElementById('subject').value.trim();
   const date     = document.getElementById('date').value;
@@ -443,12 +477,13 @@ async function addMeeting() {
   const code     = document.getElementById('code').value.trim();
   const notes    = document.getElementById('notes').value.trim();
   const botEnabled = document.getElementById('botEnabled').checked;
+  const category   = document.getElementById('category').value || 'work';
   if (!subject || !date || !time || !platform || !code) {
     toast('Please fill in all required fields.', 'error'); return;
   }
   const { data, error } = await sb.from('meetings').insert({
     user_id: _currentUser.id, subject, date, time, platform, code,
-    link: buildLink(platform, code), notes, bot_enabled: botEnabled
+    link: buildLink(platform, code), notes, bot_enabled: botEnabled, category
   }).select().single();
   if (error) { toast('Error saving meeting: ' + error.message, 'error'); return; }
   _meetings.push(data);
@@ -457,6 +492,8 @@ async function addMeeting() {
   document.getElementById('date').value = '';
   document.getElementById('time').value = '';
   document.getElementById('botEnabled').checked = false;
+  document.getElementById('category').value = 'work';
+  document.querySelectorAll('#catPicker .cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'work'));
   refreshAll();
   toast('Meeting scheduled!', 'success');
 }
@@ -470,7 +507,8 @@ function loadMeetings() {
   let count = 0;
 
   meetings.forEach(m => {
-    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
+    if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query) && !(m.category||'').includes(query)) return;
+    if (_catFilter !== 'all' && (m.category || 'work') !== _catFilter) return;
     count++;
     list.innerHTML += `
       <div class="meeting-card">
@@ -481,6 +519,7 @@ function loadMeetings() {
             <span>📅 ${m.date}</span><span>🕐 ${m.time}</span>
             <span class="meeting-badge badge-${m.platform}">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':'Jitsi'}</span>
             ${m.bot_enabled ? '<span class="meeting-badge badge-bot">🤖 Bot ON</span>' : ''}
+            ${catBadge(m.category)}
           </div>
         </div>
         <div class="meeting-actions">
@@ -532,6 +571,9 @@ function openEditModal(id) {
   document.getElementById('editCode').value         = m.code;
   document.getElementById('editIndex').value        = id;
   document.getElementById('editBotEnabled').checked = !!m.bot_enabled;
+  const ec = m.category || 'work';
+  document.getElementById('editCategory').value = ec;
+  document.querySelectorAll('#editCatPicker .cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === ec));
   openModal('editModal');
 }
 
@@ -544,7 +586,8 @@ async function updateMeeting() {
     date:        document.getElementById('editDate').value,
     time:        document.getElementById('editTime').value,
     platform, code, link: buildLink(platform, code),
-    bot_enabled: document.getElementById('editBotEnabled').checked
+    bot_enabled: document.getElementById('editBotEnabled').checked,
+    category:    document.getElementById('editCategory').value || 'work'
   };
   const { data, error } = await sb.from('meetings').update(updates).eq('id', id).select().single();
   if (error) { toast('Error updating: ' + error.message, 'error'); return; }
@@ -1941,6 +1984,8 @@ window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
 window.toggleBotEnabled       = toggleBotEnabled;
+window.pickCat                = pickCat;
+window.setCatFilter           = setCatFilter;
 
 /* ============================================================
    BOOTSTRAP

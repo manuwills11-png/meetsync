@@ -2104,3 +2104,55 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
 .badge-cat-interview { background: rgba(234,179,8,0.15);  color: #facc15; }
 .badge-cat-education { background: rgba(20,184,166,0.15); color: #2dd4bf; }
 .badge-cat-other     { background: rgba(107,114,128,0.15);color: #9ca3af; }
+/* ============================================================
+   CATEGORIES
+============================================================ */
+.cat-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cat-btn {
+  padding: 6px 13px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--muted, #8888a8);
+  transition: all 0.18s;
+}
+.cat-btn:hover  { background: rgba(255,255,255,0.1); color: #fff; }
+.cat-btn.active { background: rgba(124,108,248,0.2); border-color: #7c6cf8; color: #a78bfa; }
+
+.cat-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cat-filter-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--muted, #8888a8);
+  transition: all 0.18s;
+}
+.cat-filter-btn:hover  { background: rgba(255,255,255,0.08); color: #fff; }
+.cat-filter-btn.active { background: rgba(124,108,248,0.15); border-color: #7c6cf8; color: #a78bfa; }
+
+.meeting-badge.badge-cat { font-size: 11px; }
+.badge-cat-work      { background: rgba(59,130,246,0.15);  color: #60a5fa; }
+.badge-cat-personal  { background: rgba(34,197,94,0.15);   color: #4ade80; }
+.badge-cat-family    { background: rgba(249,115,22,0.15);  color: #fb923c; }
+.badge-cat-client    { background: rgba(168,85,247,0.15);  color: #c084fc; }
+.badge-cat-interview { background: rgba(234,179,8,0.15);   color: #facc15; }
+.badge-cat-education { background: rgba(20,184,166,0.15);  color: #2dd4bf; }
+.badge-cat-other     { background: rgba(107,114,128,0.15); color: #9ca3af; }
