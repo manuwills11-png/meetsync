@@ -829,7 +829,7 @@ function updateAnalytics() {
     if (existingCatChart) existingCatChart.destroy();
     new Chart(catCanvas, {
       type: 'doughnut',
-      data: { labels: Object.keys(catCounts).map(k => k.charAt(0).toUpperCase()+k.slice(1)), datasets:[{ data: Object.values(catCounts), backgroundColor: catColors, borderWidth:0, hoverOffset:8 }] },
+      data: { labels: ['Work','Client','Personal','Family','Education','Interview','Other'], datasets:[{ data: Object.values(catCounts), backgroundColor: catColors, borderWidth:0, hoverOffset:8 }] },
       options: { responsive:true, maintainAspectRatio:true, cutout:'65%', plugins:{ legend:{ position:'bottom', labels:{ padding:12, font:{ size:11 } } } } }
     });
   }
@@ -844,26 +844,31 @@ function updateAnalytics() {
     if (existingHourChart) existingHourChart.destroy();
     new Chart(hourCanvas, {
       type: 'bar',
-      data: { labels: Object.keys(hc).map(h => (h>12?h-12:h)+(h>=12?'pm':'am')), datasets:[{ label:'Meetings', data:Object.values(hc), backgroundColor:'rgba(34,211,160,0.7)', borderRadius:5, borderSkipped:false }] },
+      data: { labels: Object.keys(hc).map(h => (h>12?h-12:h)+(parseInt(h)>=12?'pm':'am')), datasets:[{ label:'Meetings', data:Object.values(hc), backgroundColor:'rgba(34,211,160,0.7)', borderRadius:5, borderSkipped:false }] },
       options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ stepSize:1 } } } }
     });
   }
 
-  // Busiest day
+  // Busiest day KPI
   const busiestEntry = Object.entries(wc).sort((a,b) => b[1]-a[1])[0];
   const busiestEl = document.getElementById('busiestDay');
   if (busiestEl) busiestEl.innerText = busiestEntry && busiestEntry[1] > 0 ? busiestEntry[0] : '—';
 
-  // Avg per week & this week count
-  const allDates = meetings.map(m => m.date).sort();
+  // Avg per week KPI
   const avgWeekEl = document.getElementById('avgWeek');
-  if (avgWeekEl && allDates.length >= 2) {
-    const firstDate = new Date(allDates[0]+'T12:00:00');
-    const lastDate  = new Date(allDates[allDates.length-1]+'T12:00:00');
-    const weeks = Math.max(1, Math.ceil((lastDate - firstDate) / (7*24*60*60*1000)));
-    avgWeekEl.innerText = (meetings.length / weeks).toFixed(1);
-  } else if (avgWeekEl) { avgWeekEl.innerText = meetings.length; }
+  if (avgWeekEl) {
+    const allDates = meetings.map(m => m.date).sort();
+    if (allDates.length >= 2) {
+      const firstDate = new Date(allDates[0]+'T12:00:00');
+      const lastDate  = new Date(allDates[allDates.length-1]+'T12:00:00');
+      const weeks = Math.max(1, Math.ceil((lastDate - firstDate) / (7*24*60*60*1000)));
+      avgWeekEl.innerText = (meetings.length / weeks).toFixed(1);
+    } else {
+      avgWeekEl.innerText = meetings.length;
+    }
+  }
 
+  // This week KPI
   const thisWeekEl = document.getElementById('thisWeekCount');
   if (thisWeekEl) {
     const now = new Date();
