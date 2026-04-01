@@ -1093,19 +1093,10 @@ select.form-control option { background: var(--surface2); }
 }
 .cal-day:hover       { background: rgba(255,255,255,0.05); color: var(--text); }
 .cal-day.has-meeting { color: var(--text); font-weight: 600; }
-.cal-day.has-meeting::after {
-  content: '';
-  position: absolute;
-  bottom: clamp(2px, .5vw, 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: var(--accent);
-}
 .cal-day.today    { border-color: var(--accent); color: var(--accent); }
 .cal-day.today:hover { background: var(--accent-dim); }
 .cal-day.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+.cal-day.selected .cal-dot { opacity: 0.7; filter: brightness(2); }
 .cal-day.empty    { cursor: default; pointer-events: none; }
 .cal-details { margin-top: clamp(16px, 2.2vw, 22px); padding-top: clamp(14px, 2vw, 20px); border-top: 1px solid var(--border); }
 .cal-details h4 { font-family: var(--font-d); font-size: var(--fs-sm); font-weight: 600; margin-bottom: clamp(10px, 1.5vw, 14px); color: var(--text-2); }
@@ -2025,6 +2016,68 @@ body.theme-rose   { --bg: #110a0f; --surface: #1c0f18; --surface2: #251522; --ac
 
   /* Theme grid 2 cols */
   .theme-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ============================================================
+   CATEGORY EDITOR (Settings → Categories)
+============================================================ */
+.cat-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.2s;
+}
+.cat-editor-row:hover {
+  border-color: var(--border-hov);
+}
+.cat-editor-name {
+  height: 36px;
+  font-size: 13px;
+}
+.cat-editor-reset {
+  font-size: 11px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+input[type="color"].cat-color-input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 36px;
+  height: 36px;
+  border: 2px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+  transition: border-color 0.2s;
+}
+input[type="color"].cat-color-input::-webkit-color-swatch-wrapper { padding: 0; border-radius: 6px; }
+input[type="color"].cat-color-input::-webkit-color-swatch         { border: none; border-radius: 5px; }
+input[type="color"].cat-color-input:hover { border-color: rgba(255,255,255,0.3); }
+
+/* Calendar colored dots */
+.cal-day {
+  position: relative;
+}
+.cal-dots {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  right: 0;
+}
+.cal-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 /* ============================================================

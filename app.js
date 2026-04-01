@@ -28,6 +28,58 @@ const getRecurring = () => _recurring;
    Flow: save locally → upsert to Supabase → show ✓
          on login → fetch from Supabase → overwrite local → apply
 ============================================================ */
+const DEFAULT_CATEGORIES = {
+  work:      { label: 'Work',      icon: '💼', color: '#60a5fa' },
+  client:    { label: 'Client',    icon: '🤝', color: '#c084fc' },
+  personal:  { label: 'Personal',  icon: '👤', color: '#4ade80' },
+  family:    { label: 'Family',    icon: '👨‍👩‍👧', color: '#fb923c' },
+  education: { label: 'Education', icon: '📚', color: '#2dd4bf' },
+  interview: { label: 'Interview', icon: '🎯', color: '#facc15' },
+  other:     { label: 'Other',     icon: '📌', color: '#9ca3af' },
+};
+
+function getCategories() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('categories') || 'null');
+    if (!raw) return { ...DEFAULT_CATEGORIES };
+    // Merge: keep defaults for any missing key
+    const merged = { ...DEFAULT_CATEGORIES };
+    Object.keys(DEFAULT_CATEGORIES).forEach(k => {
+      if (raw[k]) merged[k] = { ...DEFAULT_CATEGORIES[k], ...raw[k] };
+    });
+    return merged;
+  } catch { return { ...DEFAULT_CATEGORIES }; }
+}
+
+async function saveCategories(cats) {
+  localStorage.setItem('categories', JSON.stringify(cats));
+  applyDynamicCategoryStyles();
+  if (!_currentUser) return;
+  try {
+    const s = getSettings();
+    s._categories = cats;
+    await saveSettings(s);
+  } catch(e) { console.warn('Category sync failed:', e.message); }
+}
+
+function applyDynamicCategoryStyles() {
+  const cats = getCategories();
+  let styleEl = document.getElementById('dynamic-cat-styles');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamic-cat-styles';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = Object.entries(cats).map(([key, cat]) => {
+    const hex = cat.color;
+    // Parse hex to rgb for rgba usage
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return `.badge-cat-${key} { background: rgba(${r},${g},${b},0.15); color: ${hex}; }`;
+  }).join('\n');
+}
+
 const DEFAULT_SETTINGS = {
   profile:       { username: '', email: '' },
   notifications: { browser: false, emailReminders: false, reminderMinutes: 15 },
@@ -105,6 +157,14 @@ function applySettingsToUI(s) {
   const avatarEl = document.getElementById('sidebarAvatar');
   if (nameEl   && name) nameEl.innerText   = name;
   if (avatarEl && name) avatarEl.innerText = name.charAt(0).toUpperCase();
+
+  // Apply custom category styles
+  applyDynamicCategoryStyles();
+
+  // Sync categories stored inside settings (cross-device)
+  if (s._categories) {
+    localStorage.setItem('categories', JSON.stringify(s._categories));
+  }
 }
 
 /* ============================================================
@@ -479,7 +539,8 @@ function loadMeetings() {
   list.innerHTML  = '';
   let count = 0;
 
-  const catLabels = { work:'💼 Work', client:'🤝 Client', personal:'👤 Personal', family:'👨‍👩‍👧 Family', education:'📚 Education', interview:'🎯 Interview', other:'📌 Other' };
+  const catDefs = getCategories();
+  const catLabels = Object.fromEntries(Object.entries(catDefs).map(([k,v]) => [k, `${v.icon} ${v.label}`]));
 
   meetings.forEach(m => {
     if (query && !m.subject.toLowerCase().includes(query) && !m.platform.includes(query)) return;
@@ -669,23 +730,31 @@ function updateDashboardStats() {
   document.getElementById('statToday').innerText     = todayCount;
   document.getElementById('todayBadge').innerText    = todayCount;
 
+  const catDefs = getCategories();
   const allToday = [...todayOnce];
-  todayRec.forEach(r => allToday.push({ subject: r.subject, time: r.time, platform: r.platform }));
+  todayRec.forEach(r => allToday.push({ subject: r.subject, time: r.time, platform: r.platform, category: 'work' }));
   const ul = document.getElementById('upcomingList');
   if (allToday.length === 0) {
     ul.innerHTML = '<div class="upcoming-empty">No meetings today. Enjoy your day! 🎉</div>';
     return;
   }
   allToday.sort((a, b) => a.time.localeCompare(b.time));
-  ul.innerHTML = allToday.map(m => `
+  ul.innerHTML = allToday.map(m => {
+    const cat   = m.category || 'work';
+    const color = catDefs[cat]?.color || '#7c6cf8';
+    return `
     <div class="upcoming-item">
-      <div class="upcoming-dot ${m.platform || 'other'}"></div>
+      <div class="upcoming-dot" style="background:${color};box-shadow:0 0 5px ${color}55;flex-shrink:0;"></div>
       <div class="upcoming-info">
         <div class="upcoming-title">${m.subject}</div>
-        <div class="upcoming-meta">${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':m.platform==='jitsi'?'Jitsi':''}</div>
+        <div class="upcoming-meta" style="display:flex;gap:6px;align-items:center;">
+          <span>${m.platform==='meet'?'Google Meet':m.platform==='zoom'?'Zoom':m.platform==='jitsi'?'Jitsi':''}</span>
+          <span style="color:${color};font-size:11px;">${catDefs[cat]?.icon||''} ${catDefs[cat]?.label||cat}</span>
+        </div>
       </div>
       <div class="upcoming-time">${m.time}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 /* ============================================================
@@ -732,14 +801,29 @@ function renderCalendar() {
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const meetings    = getMeetings();
   const recurring   = getRecurring();
+  const cats        = getCategories();
   const today       = localToday();
   for (let i = 0; i < firstDay; i++) cal.innerHTML += `<div class="cal-day empty"></div>`;
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const wd = new Date(ds+'T12:00:00').toLocaleString('default', { weekday:'short' });
-    const hasMeeting = meetings.some(m => m.date===ds) || recurring.some(r => r.days.includes(wd));
-    const isToday    = ds === today;
-    cal.innerHTML += `<div class="cal-day ${hasMeeting?'has-meeting':''} ${isToday?'today':''}" onclick="showMeetingsForDate('${ds}',this)">${d}</div>`;
+    const dayMeetings = meetings.filter(m => m.date===ds);
+    const hasRec      = recurring.some(r => r.days.includes(wd));
+    const hasMeeting  = dayMeetings.length > 0 || hasRec;
+    const isToday     = ds === today;
+
+    // Build colored dots for up to 3 categories
+    let dotsHtml = '';
+    if (hasMeeting) {
+      const usedCats = [...new Set(dayMeetings.map(m => m.category || 'work'))];
+      if (hasRec && !usedCats.includes('work')) usedCats.push('work');
+      dotsHtml = `<div class="cal-dots">${usedCats.slice(0,3).map(cat => {
+        const color = cats[cat]?.color || '#7c6cf8';
+        return `<span class="cal-dot" style="background:${color};"></span>`;
+      }).join('')}</div>`;
+    }
+
+    cal.innerHTML += `<div class="cal-day ${hasMeeting?'has-meeting':''} ${isToday?'today':''}" onclick="showMeetingsForDate('${ds}',this)">${d}${dotsHtml}</div>`;
   }
 }
 
@@ -756,10 +840,11 @@ function showMeetingsForDate(date, el) {
   if (el) el.classList.add('selected');
   const meetings  = getMeetings();
   const recurring = getRecurring();
+  const cats      = getCategories();
   const wd = new Date(date+'T12:00:00').toLocaleString('default', { weekday:'short' });
   const filtered = meetings.filter(m => m.date===date);
   recurring.forEach(r => {
-    if (r.days.includes(wd)) filtered.push({ subject:r.subject, time:r.time, platform:r.platform, link:buildLink(r.platform,r.code) });
+    if (r.days.includes(wd)) filtered.push({ subject:r.subject, time:r.time, platform:r.platform, link:buildLink(r.platform,r.code), category:'work' });
   });
   const container = document.getElementById('dayMeetings');
   container.innerHTML = `<h4>${new Date(date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</h4>`;
@@ -768,12 +853,14 @@ function showMeetingsForDate(date, el) {
     return;
   }
   filtered.sort((a,b)=>a.time.localeCompare(b.time)).forEach(m => {
+    const cat   = m.category || 'work';
+    const color = cats[cat]?.color || '#7c6cf8';
     container.innerHTML += `
       <div class="upcoming-item">
-        <div class="upcoming-dot ${m.platform||'other'}"></div>
+        <div class="upcoming-dot" style="background:${color};box-shadow:0 0 6px ${color}55;"></div>
         <div class="upcoming-info">
           <div class="upcoming-title">${m.subject}</div>
-          <div class="upcoming-meta">${m.platform||''}</div>
+          <div class="upcoming-meta">${m.platform||''} · <span style="color:${color};font-size:11px;">${cats[cat]?.icon||''} ${cats[cat]?.label||cat}</span></div>
         </div>
         <div class="upcoming-time">${m.time}</div>
         <button class="icon-btn join" onclick="window.open('${m.link}','_blank')" style="margin-left:8px;width:28px;height:28px;font-size:12px;">▶</button>
@@ -822,14 +909,17 @@ function updateAnalytics() {
   // Category breakdown chart
   const catCanvas = document.getElementById('categoryChart');
   if (catCanvas) {
-    const catCounts = { work:0, client:0, personal:0, family:0, education:0, interview:0, other:0 };
+    const cats = getCategories();
+    const catKeys   = Object.keys(cats);
+    const catCounts = Object.fromEntries(catKeys.map(k => [k, 0]));
     meetings.forEach(m => { const c = m.category || 'work'; if (catCounts[c] !== undefined) catCounts[c]++; });
-    const catColors = ['#60a5fa','#c084fc','#4ade80','#fb923c','#2dd4bf','#facc15','#9ca3af'];
+    const catColors = catKeys.map(k => cats[k]?.color || '#9ca3af');
+    const catLabels = catKeys.map(k => `${cats[k]?.icon || ''} ${cats[k]?.label || k}`);
     const existingCatChart = Chart.getChart(catCanvas);
     if (existingCatChart) existingCatChart.destroy();
     new Chart(catCanvas, {
       type: 'doughnut',
-      data: { labels: ['Work','Client','Personal','Family','Education','Interview','Other'], datasets:[{ data: Object.values(catCounts), backgroundColor: catColors, borderWidth:0, hoverOffset:8 }] },
+      data: { labels: catLabels, datasets:[{ data: catKeys.map(k => catCounts[k]), backgroundColor: catColors, borderWidth:0, hoverOffset:8 }] },
       options: { responsive:true, maintainAspectRatio:true, cutout:'65%', plugins:{ legend:{ position:'bottom', labels:{ padding:12, font:{ size:11 } } } } }
     });
   }
@@ -982,6 +1072,33 @@ function loadSettings(section, btn) {
         ${themes.map(t=>`<div class="theme-swatch ${s.appearance?.theme===t.id?'active':''}" style="background:${t.bg}" onclick="changeTheme('${t.id}',this)"><span>${t.label}</span></div>`).join('')}
       </div>`;
 
+  } else if (section === 'categories') {
+    const cats = getCategories();
+    c.innerHTML = `<h3>Categories</h3><p class="desc">Customize category names, icons, and colors. Changes apply to heatmap, calendar, and badges.</p>
+      <div id="catEditorList" style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+        ${Object.entries(cats).map(([key, cat]) => `
+          <div class="cat-editor-row" data-key="${key}">
+            <div class="cat-editor-preview" style="background:${cat.color}20;border:1.5px solid ${cat.color};border-radius:8px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;" onclick="pickCatIcon('${key}')" title="Click to change icon">${cat.icon}</div>
+            <input class="form-control cat-editor-name" type="text" value="${cat.label}" placeholder="Category name" data-key="${key}" style="flex:1;min-width:80px;" oninput="previewCatRow('${key}',this)">
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+              <input type="color" class="cat-color-input" value="${cat.color}" data-key="${key}" title="Pick color" style="width:36px;height:36px;border:none;background:none;cursor:pointer;padding:2px;border-radius:6px;" oninput="previewCatColor('${key}',this)">
+            </div>
+            <button class="btn-ghost cat-editor-reset" style="font-size:11px;padding:4px 10px;flex-shrink:0;" onclick="resetCatToDefault('${key}')">Reset</button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn-accent" onclick="saveCategorySettings()">💾 Save Categories</button>
+        <button class="btn-ghost" onclick="resetAllCategories()">↺ Reset All</button>
+      </div>
+      <div id="catSaveMsg" style="margin-top:10px;font-size:13px;color:var(--green);display:none;">✅ Categories saved!</div>
+
+      <!-- Icon picker panel -->
+      <div id="iconPickerPanel" style="display:none;margin-top:16px;padding:14px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);">
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:10px;">Pick an icon for <strong id="iconPickerLabel"></strong></div>
+        <div id="iconPickerGrid" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+        <button class="btn-ghost" style="margin-top:12px;font-size:12px;padding:4px 10px;" onclick="document.getElementById('iconPickerPanel').style.display='none'">Close</button>
+      </div>`;
+
   } else if (section === 'data') {
     c.innerHTML = `<h3>Data & Privacy</h3><p class="desc">Manage your stored data and account.</p>
       <div class="setting-row">
@@ -1067,6 +1184,128 @@ async function changeTheme(theme, el) {
   s.appearance.theme = theme;
   await saveSettings(s, 'Theme applied!');
 }
+
+/* ============================================================
+   CATEGORY CUSTOMIZATION HELPERS
+============================================================ */
+// Temp store for in-progress edits (before Save is clicked)
+let _catEdits = {};
+
+function previewCatRow(key, nameInput) {
+  if (!_catEdits[key]) _catEdits[key] = {};
+  _catEdits[key].label = nameInput.value.trim();
+}
+
+function previewCatColor(key, colorInput) {
+  if (!_catEdits[key]) _catEdits[key] = {};
+  _catEdits[key].color = colorInput.value;
+  // Live-update the preview icon box border/bg
+  const row = document.querySelector(`.cat-editor-row[data-key="${key}"]`);
+  if (row) {
+    const preview = row.querySelector('.cat-editor-preview');
+    if (preview) {
+      preview.style.background = colorInput.value + '20';
+      preview.style.borderColor = colorInput.value;
+    }
+  }
+}
+
+const ICON_PRESETS = [
+  '💼','🤝','👤','👨‍👩‍👧','📚','🎯','📌','🌟','🔥','🏆','💡','🚀','🎨','💬',
+  '🏋️','🎵','🎮','🍕','✈️','🏠','🔬','💊','📊','🗂️','📝','🤖','🌐','🔐',
+  '📞','🛒','🧠','⚡','🌈','🏖️','🎉','🔔','💰','🎓','🌿','🔧'
+];
+
+let _iconPickerKey = null;
+
+function pickCatIcon(key) {
+  _iconPickerKey = key;
+  const cats = getCategories();
+  const panel = document.getElementById('iconPickerPanel');
+  const label = document.getElementById('iconPickerLabel');
+  const grid  = document.getElementById('iconPickerGrid');
+  if (!panel || !label || !grid) return;
+  const currentCat = { ...cats[key], ...(_catEdits[key] || {}) };
+  label.textContent = currentCat.label || key;
+  grid.innerHTML = ICON_PRESETS.map(icon =>
+    `<button onclick="selectCatIcon('${key}','${icon}')"
+      style="width:36px;height:36px;font-size:18px;background:${icon===currentCat.icon?'rgba(124,108,248,0.25)':'rgba(255,255,255,0.04)'};border:1px solid ${icon===currentCat.icon?'#7c6cf8':'rgba(255,255,255,0.08)'};border-radius:8px;cursor:pointer;transition:all 0.15s;"
+      title="${icon}">${icon}</button>`
+  ).join('');
+  panel.style.display = 'block';
+}
+
+function selectCatIcon(key, icon) {
+  if (!_catEdits[key]) _catEdits[key] = {};
+  _catEdits[key].icon = icon;
+  // Update the preview box in the row
+  const row = document.querySelector(`.cat-editor-row[data-key="${key}"]`);
+  if (row) {
+    const preview = row.querySelector('.cat-editor-preview');
+    if (preview) preview.textContent = icon;
+  }
+  document.getElementById('iconPickerPanel').style.display = 'none';
+  _iconPickerKey = null;
+}
+
+async function saveCategorySettings() {
+  const cats = getCategories();
+  // Collect all row inputs
+  document.querySelectorAll('.cat-editor-row').forEach(row => {
+    const key = row.dataset.key;
+    if (!key) return;
+    const nameEl  = row.querySelector('.cat-editor-name');
+    const colorEl = row.querySelector('.cat-color-input');
+    if (!cats[key]) return;
+    if (nameEl  && nameEl.value.trim())  cats[key].label = nameEl.value.trim();
+    if (colorEl) cats[key].color = colorEl.value;
+    // Merge any icon edits
+    if (_catEdits[key]?.icon) cats[key].icon = _catEdits[key].icon;
+  });
+  _catEdits = {};
+  await saveCategories(cats);
+  // Refresh all dynamic UI
+  populateCategorySelects();
+  updateCategoryFilterBar();
+  refreshAll();
+  const msg = document.getElementById('catSaveMsg');
+  if (msg) { msg.style.display = 'block'; setTimeout(() => msg.style.display = 'none', 2500); }
+  toast('Categories saved!', 'success');
+}
+
+function resetCatToDefault(key) {
+  if (!DEFAULT_CATEGORIES[key]) return;
+  const cats = getCategories();
+  cats[key] = { ...DEFAULT_CATEGORIES[key] };
+  localStorage.setItem('categories', JSON.stringify(cats));
+  applyDynamicCategoryStyles();
+  // Re-render categories panel
+  loadSettings('categories', document.querySelector('.settings-tab[onclick*="categories"]'));
+  toast(`"${DEFAULT_CATEGORIES[key].label}" reset to default.`, 'info');
+}
+
+async function resetAllCategories() {
+  if (!confirm('Reset all categories to their defaults?')) return;
+  localStorage.removeItem('categories');
+  applyDynamicCategoryStyles();
+  populateCategorySelects();
+  updateCategoryFilterBar();
+  refreshAll();
+  loadSettings('categories', document.querySelector('.settings-tab[onclick*="categories"]'));
+  toast('All categories reset to defaults.', 'info');
+}
+
+function updateCategoryFilterBar() {
+  const bar = document.getElementById('categoryFilterBar');
+  if (!bar) return;
+  const cats = getCategories();
+  bar.innerHTML = `<button class="cat-filter active" onclick="setCatFilter('all',this)">All</button>` +
+    Object.entries(cats).map(([k, v]) =>
+      `<button class="cat-filter" onclick="setCatFilter('${k}',this)">${v.icon} ${v.label}</button>`
+    ).join('');
+}
+
+
 
 async function toggleOTPSetting(enabled) {
   const s = getSettings();
@@ -1185,7 +1424,23 @@ setInterval(checkMeetingReminders, 30000);
 /* ============================================================
    MODALS
 ============================================================ */
-function openModal(id)  { document.getElementById(id).classList.add('show'); }
+function populateCategorySelects() {
+  const cats = getCategories();
+  const options = Object.entries(cats).map(([k,v]) => `<option value="${k}">${v.icon} ${v.label}</option>`).join('');
+  ['category','editCategory'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = options;
+    if (cur) el.value = cur;
+  });
+}
+
+function openModal(id)  {
+  // Refresh category dropdowns with custom names before opening
+  populateCategorySelects();
+  document.getElementById(id).classList.add('show');
+}
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
 document.querySelectorAll('.modal-backdrop').forEach(m => {
@@ -2044,25 +2299,20 @@ function updateBudgetBars() {
   const totalHours = Object.values(catTotals).reduce((a,b) => a+b, 0);
   if (badge) badge.textContent = totalHours.toFixed(1) + 'h used';
 
-  const cats = ['work','client','personal','family','education','interview','other'];
-  const catColors = {
-    work:'#60a5fa', personal:'#4ade80', family:'#fb923c',
-    client:'#c084fc', interview:'#facc15', education:'#2dd4bf', other:'#9ca3af'
-  };
-  const catIcons = {
-    work:'💼', personal:'👤', family:'👨‍👩‍👧', client:'🤝',
-    interview:'🎯', education:'📚', other:'📌'
-  };
+  const catDefs = getCategories();
+  const catKeys = Object.keys(catDefs);
 
-  container.innerHTML = cats.map(cat => {
+  container.innerHTML = catKeys.map(cat => {
     const used   = catTotals[cat] || 0;
     const budget = WEEKLY_BUDGETS[cat] || 10;
     const pct    = Math.min(100, (used / budget) * 100);
     const over   = used > budget;
-    const color  = over ? '#ef4444' : catColors[cat];
+    const color  = over ? '#ef4444' : (catDefs[cat]?.color || '#9ca3af');
+    const icon   = catDefs[cat]?.icon  || '📌';
+    const label  = catDefs[cat]?.label || cat;
     return `
       <div class="budget-row">
-        <span class="budget-label">${catIcons[cat]} ${cat}</span>
+        <span class="budget-label">${icon} ${label}</span>
         <div class="budget-bar-wrap">
           <div class="budget-bar-fill" style="width:${pct}%;background:${color};"></div>
         </div>
@@ -2078,29 +2328,55 @@ function renderHeatmap() {
 
   const meetings  = getMeetings();
   const recurring = getRecurring();
+  const cats      = getCategories();
   const days      = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const hours     = [8,9,10,11,12,13,14,15,16,17,18,19,20];
 
-  // Count meetings per day+hour
-  const grid = {};
-  days.forEach(d => { grid[d] = {}; hours.forEach(h => { grid[d][h] = 0; }); });
+  // Count meetings per day+hour and track dominant category
+  const grid     = {};
+  const gridCats = {};
+  days.forEach(d => {
+    grid[d]     = {};
+    gridCats[d] = {};
+    hours.forEach(h => { grid[d][h] = 0; gridCats[d][h] = {}; });
+  });
 
   meetings.forEach(m => {
     if (!m.date || !m.time) return;
     const d   = new Date(m.date).toLocaleString('default', { weekday: 'short' });
     const h   = parseInt(m.time.split(':')[0]);
-    if (grid[d] && grid[d][h] !== undefined) grid[d][h]++;
+    if (grid[d] && grid[d][h] !== undefined) {
+      grid[d][h]++;
+      const cat = m.category || 'work';
+      gridCats[d][h][cat] = (gridCats[d][h][cat] || 0) + 1;
+    }
   });
 
   recurring.forEach(r => {
     if (!r.days || !r.time) return;
     const h = parseInt(r.time.split(':')[0]);
     r.days.forEach(d => {
-      if (grid[d] && grid[d][h] !== undefined) grid[d][h]++;
+      if (grid[d] && grid[d][h] !== undefined) {
+        grid[d][h]++;
+        gridCats[d][h]['work'] = (gridCats[d][h]['work'] || 0) + 1;
+      }
     });
   });
 
   const max = Math.max(1, ...days.flatMap(d => hours.map(h => grid[d][h])));
+
+  // Helper: get dominant category color for a cell
+  function cellColor(d, h, count) {
+    if (count === 0) return 'rgba(255,255,255,0.04)';
+    const catMap = gridCats[d][h];
+    const dominant = Object.entries(catMap).sort((a,b) => b[1]-a[1])[0]?.[0] || 'work';
+    const hex = (cats[dominant]?.color) || '#7c6cf8';
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    const opacity = 0.15 + (count/max)*0.85;
+    return `rgba(${r},${g},${b},${opacity})`;
+  }
 
   container.innerHTML = `
     <div class="heatmap-labels-row">
@@ -2112,8 +2388,7 @@ function renderHeatmap() {
         <div class="heatmap-hour-label">${minsToTime(h*60)}</div>
         ${days.map(d => {
           const count = grid[d][h];
-          const opacity = count === 0 ? 0.05 : 0.15 + (count/max)*0.85;
-          const bg = count === 0 ? 'rgba(255,255,255,0.04)' : `rgba(124,108,248,${opacity})`;
+          const bg = cellColor(d, h, count);
           return `<div class="heatmap-cell" title="${d} ${minsToTime(h*60)}: ${count} meeting${count!==1?'s':''}" style="background:${bg};">${count > 0 ? count : ''}</div>`;
         }).join('')}
       </div>`).join('')}`;
@@ -2250,6 +2525,11 @@ function initApp() {
   applySettingsToUI(s);
   setTimeout(updateNoveltyFeatures, 500);
 
+  // Apply custom category styles and populate dynamic UI
+  applyDynamicCategoryStyles();
+  updateCategoryFilterBar();
+  populateCategorySelects();
+
   // Restore sidebar collapsed state
   if (localStorage.getItem('sidebarCollapsed') === 'true') {
     document.getElementById('sidebar')?.classList.add('collapsed');
@@ -2288,6 +2568,13 @@ function toggleSidebar() {
 window.toggleOTPSetting    = toggleOTPSetting;
 window.toggleSidebar       = toggleSidebar;
 window.handleAuth          = handleAuth;
+window.saveCategorySettings  = saveCategorySettings;
+window.resetCatToDefault     = resetCatToDefault;
+window.resetAllCategories    = resetAllCategories;
+window.pickCatIcon           = pickCatIcon;
+window.selectCatIcon         = selectCatIcon;
+window.previewCatRow         = previewCatRow;
+window.previewCatColor       = previewCatColor;
 
 window.showLoading         = showLoading;
 window.hideLoading         = hideLoading;
