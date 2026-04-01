@@ -454,13 +454,22 @@
         <div class="ai-dot"></div>
         <div>
           <h4>MeetSync AI</h4>
-          <span class="ai-subtitle">Smart assistant · No API needed</span>
+          <span class="ai-subtitle" id="aiSubtitle">Smart assistant · Powered by Groq</span>
         </div>
       </div>
       <div class="ai-header-actions">
+        <button class="ai-header-btn" onclick="toggleGrokKeyPanel()" title="Set Grok API key" id="grokKeyBtn">🔑</button>
         <button class="ai-header-btn" onclick="aiClearChat()" title="Clear chat">🗑</button>
         <button class="ai-close" onclick="toggleAI()">✕</button>
       </div>
+    </div>
+    <!-- Grok API Key Panel -->
+    <div id="grokKeyPanel" style="display:none;padding:10px 14px;background:var(--surface2,#1e1e2e);border-bottom:1px solid var(--border,#333);gap:8px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:12px;color:var(--text2,#888);flex:0 0 100%;margin-bottom:4px;">🔑 Groq API Key — <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent,#7c3aed);">Get one at console.groq.com</a></span>
+      <input type="password" id="grokKeyInput" placeholder="gsk_xxxxxxxxxxxxxxxx"
+        style="flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border,#444);background:var(--bg,#141420);color:var(--text,#eee);font-size:13px;min-width:0;">
+      <button onclick="applyGrokKey()"
+        style="padding:7px 14px;border-radius:8px;background:var(--accent,#7c3aed);color:#fff;border:none;cursor:pointer;font-size:13px;white-space:nowrap;">Save</button>
     </div>
     <div class="ai-body" id="aiBody">
       <div class="ai-msg bot">

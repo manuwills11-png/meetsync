@@ -1409,14 +1409,14 @@ function aiAction(action, payload = {}) {
   }
 }
 
-// ── Main NLP processor
+// ── Main processor — everything goes straight to Groq
 async function processAI() {
   const rawInput = document.getElementById('aiInput').value.trim();
   if (!rawInput) return;
-  const input = rawInput.toLowerCase();
-  const body  = document.getElementById('aiBody');
 
-  // User message with timestamp
+  const body = document.getElementById('aiBody');
+
+  // Render user message
   const userEl = document.createElement('div');
   userEl.className = 'ai-msg user';
   userEl.innerHTML = `
@@ -1429,13 +1429,7 @@ async function processAI() {
   body.scrollTop = body.scrollHeight;
   document.getElementById('aiInput').value = '';
 
-  // Save to history
   _aiHistory.push({ role: 'user', text: rawInput, time: Date.now() });
-
-  // Thinking delay
-  aiShowTyping();
-  await new Promise(r => setTimeout(r, 380 + Math.random() * 280));
-  aiHideTyping();
 
   const meetings  = getMeetings();
   const recurring = getRecurring();
@@ -1444,395 +1438,279 @@ async function processAI() {
   const s         = getSettings();
   const userName  = s.profile?.username || _currentUser?.email?.split('@')[0] || 'there';
 
-  // ── Context follow-ups ("that", "it", "same one", "reschedule it")
-  if (_aiLastResult && nlpHas(input, 'that', 'it', 'same', 'this one', 'reschedule it', 'delete it', 'join it')) {
-    const m = _aiLastResult;
-    if (nlpHas(input, 'join')) {
-      aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) });
-      aiBotMsg(`Opening <strong>${m.subject}</strong>! 🚀`);
+  await processWithGroq(rawInput, { meetings, recurring, today, todayDay, s, userName });
+}
+
+/* ============================================================
+   GROQ API INTEGRATION
+   All user messages go directly to Groq with full app context.
+   Groq responds in HTML and can embed <action> JSON tags to
+   control the app (navigate, create, delete, join, reschedule).
+============================================================ */
+
+function getGrokApiKey() {
+  return localStorage.getItem('groqApiKey') || '';
+}
+
+function saveGrokApiKey(key) {
+  localStorage.setItem('groqApiKey', key.trim());
+}
+
+function toggleGrokKeyPanel() {
+  const panel = document.getElementById('grokKeyPanel');
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'flex';
+  if (!isOpen) {
+    const input = document.getElementById('grokKeyInput');
+    if (input) input.value = getGrokApiKey();
+    setTimeout(() => input?.focus(), 50);
+  }
+}
+
+function applyGrokKey() {
+  const val = document.getElementById('grokKeyInput')?.value?.trim();
+  if (!val) { toast('Please enter a valid API key.', 'error'); return; }
+  saveGrokApiKey(val);
+  document.getElementById('grokKeyPanel').style.display = 'none';
+  const btn = document.getElementById('grokKeyBtn');
+  if (btn) { btn.textContent = '✅'; setTimeout(() => btn.textContent = '🔑', 2000); }
+  toast('Groq API key saved! ✅', 'success');
+  const subtitle = document.getElementById('aiSubtitle');
+  if (subtitle) subtitle.textContent = 'Smart assistant · Powered by Groq ✅';
+}
+
+// Build the full app context string sent to Groq on every message
+function buildGroqContext(ctx) {
+  const { meetings, recurring, today, todayDay, s, userName } = ctx;
+  const now    = new Date();
+  const nowStr = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  const avail  = s.availability || {};
+
+  const todayMeetings = meetings.filter(m => m.date === today).sort((a,b) => a.time.localeCompare(b.time));
+  const upcoming      = meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date)).slice(0,10);
+  const past          = meetings.filter(m => m.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0,5);
+
+  const startMins = (h => h[0]*60+h[1])((avail.start||'09:00').split(':').map(Number));
+  const endMins   = (h => h[0]*60+h[1])((avail.end  ||'17:00').split(':').map(Number));
+  const bookedMins = todayMeetings.map(m => { const [h,mn]=m.time.split(':').map(Number); return h*60+mn; }).sort((a,b)=>a-b);
+  const freeSlots = [];
+  let cursor = startMins;
+  for (const mt of bookedMins) {
+    if (mt - cursor >= 30) freeSlots.push(String(Math.floor(cursor/60)).padStart(2,'0')+':'+String(cursor%60).padStart(2,'0')+'–'+String(Math.floor(mt/60)).padStart(2,'0')+':'+String(mt%60).padStart(2,'0'));
+    cursor = mt + 30;
+  }
+  if (endMins - cursor >= 30) freeSlots.push(String(Math.floor(cursor/60)).padStart(2,'0')+':'+String(cursor%60).padStart(2,'0')+'–'+String(Math.floor(endMins/60)).padStart(2,'0')+':'+String(endMins%60).padStart(2,'0'));
+
+  const nl = '\n';
+  const fmtMeeting  = m => '  [id:'+m.id+'] "'+m.subject+'" at '+m.time+' via '+m.platform+' | code:'+(m.code||'—')+' | link:'+(m.link||buildLink(m.platform,m.code));
+  const fmtUpcoming = m => '  [id:'+m.id+'] "'+m.subject+'" on '+m.date+' at '+m.time+' via '+m.platform;
+  const fmtPast     = m => '  [id:'+m.id+'] "'+m.subject+'" on '+m.date+' at '+m.time;
+  const fmtRec      = r => '  [id:'+r.id+'] "'+r.subject+'" every '+(r.days||[]).join(',')+ ' at '+r.time+' via '+r.platform;
+
+  return [
+    '=== APP STATE ===',
+    'User: '+userName,
+    'Current time: '+nowStr+' on '+today+' ('+todayDay+')',
+    'Working hours: '+(avail.start||'09:00')+'–'+(avail.end||'17:00')+' | Buffer: '+(avail.buffer||0)+'min | Max/day: '+(avail.maxPerDay||10),
+    'Default platform: '+(s.defaults?.platform||'meet')+' | Default duration: '+(s.defaults?.duration||30)+'min',
+    '',
+    'TODAY\'S MEETINGS ('+todayMeetings.length+'):',
+    todayMeetings.length ? todayMeetings.map(fmtMeeting).join(nl) : '  (none)',
+    '',
+    'FREE SLOTS TODAY: '+(freeSlots.length ? freeSlots.join(', ') : '(none in working hours)'),
+    '',
+    'UPCOMING MEETINGS (next 10):',
+    upcoming.length ? upcoming.map(fmtUpcoming).join(nl) : '  (none)',
+    '',
+    'RECENT PAST MEETINGS:',
+    past.length ? past.map(fmtPast).join(nl) : '  (none)',
+    '',
+    'RECURRING MEETINGS ('+recurring.length+'):',
+    recurring.length ? recurring.map(fmtRec).join(nl) : '  (none)',
+    '',
+    'TOTALS: '+meetings.length+' one-time | '+recurring.length+' recurring'
+  ].join(nl);
+}
+
+// Main Groq API call — called for every user message
+async function processWithGroq(userInput, ctx) {
+  const apiKey = getGrokApiKey();
+
+  if (!apiKey) {
+    aiBotMsg(
+      `🔑 <strong>Groq API key not set.</strong><br>Click the <strong>🔑</strong> button above, paste your key, and hit Save — then I can fully control the app!`,
+      [{ label: '🔑 Add API Key', fn: () => toggleGrokKeyPanel() }]
+    );
+    return;
+  }
+
+  const contextSummary = buildGroqContext(ctx);
+
+  const systemPrompt = `You are MeetSync AI — an intelligent assistant fully embedded in the MeetSync meeting scheduler app. You have complete read/write access to the user's calendar and can perform any app action.
+
+${contextSummary}
+
+=== YOUR CAPABILITIES ===
+You can do ALL of the following by embedding ONE <action> JSON block anywhere in your response:
+
+NAVIGATION:
+  <action>{"type":"navigate","page":"dashboard"}</action>
+  <action>{"type":"navigate","page":"meetings"}</action>
+  <action>{"type":"navigate","page":"analytics"}</action>
+  <action>{"type":"navigate","page":"calendarPage"}</action>
+  <action>{"type":"navigate","page":"settings"}</action>
+
+MEETING MANAGEMENT:
+  <action>{"type":"open-new-meeting"}</action>
+  <action>{"type":"prefill-meeting","subject":"Team Standup","date":"2026-04-05","time":"10:00","platform":"meet"}</action>
+  <action>{"type":"join-meeting","link":"https://meet.google.com/abc-defg-hij"}</action>
+  <action>{"type":"delete-meeting","id":"<meeting-id-from-context>"}</action>
+  <action>{"type":"reschedule-meeting","id":"<meeting-id>","date":"2026-04-06","time":"14:00"}</action>
+
+SETTINGS:
+  <action>{"type":"open-settings","tab":"profile"}</action>
+  <action>{"type":"open-settings","tab":"notifications"}</action>
+  <action>{"type":"open-settings","tab":"appearance"}</action>
+  <action>{"type":"open-settings","tab":"availability"}</action>
+  <action>{"type":"open-settings","tab":"security"}</action>
+
+=== RESPONSE RULES ===
+1. ALWAYS respond in HTML — use <strong>, <em>, <br> for formatting. Never use markdown.
+2. Use the exact meeting IDs from the context when referencing meetings in actions.
+3. For scheduling: always check for conflicts with existing meetings at the same time/date. Warn the user if a conflict exists.
+4. For "join": construct the join link from platform + code (meet→https://meet.google.com/{code}, zoom→https://zoom.us/j/{code}, jitsi→https://meet.jit.si/{code}).
+5. Be concise and actionable. Lead with the answer, then add the action button.
+6. Address the user by their name: ${ctx.userName}.
+7. If you cannot find a specific meeting the user refers to, list the closest matches from context.
+8. You can handle complex queries: "schedule a meeting tomorrow at 3pm on Zoom called Roadmap Review", "what's my busiest day this week", "join my next meeting", "am I free at 2pm today", "delete my Friday standup", etc.`;
+
+  const conversationHistory = _aiHistory.slice(-6).map(h => ({
+    role: h.role === 'bot' ? 'assistant' : 'user',
+    content: h.text
+  }));
+
+  aiShowTyping();
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...conversationHistory,
+          { role: 'user', content: userInput }
+        ],
+        max_tokens: 800,
+        temperature: 0.5
+      })
+    });
+
+    aiHideTyping();
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const msg = err?.error?.message || `HTTP ${response.status}`;
+      if (response.status === 401) {
+        aiBotMsg(`❌ <strong>Invalid Groq API key.</strong> Please update it.`,
+          [{ label: '🔑 Update Key', fn: () => toggleGrokKeyPanel() }]);
+      } else {
+        aiBotMsg(`❌ Groq API error: ${msg}`);
+      }
       return;
     }
-    if (nlpHas(input, 'delete', 'remove', 'cancel')) {
-      aiBotMsg(`Delete <strong>${m.subject}</strong>?`, [
-        { label: '🗑 Yes, delete', fn: () => {
-            m.days ? deleteRecurring(m.id) : deleteMeeting(m.id);
-            aiBotMsg(`✅ <strong>${m.subject}</strong> deleted.`);
-            _aiLastResult = null;
-        }},
-        { label: 'Cancel', fn: () => aiBotMsg('Keeping it!') }
-      ]);
-      return;
-    }
-    if (nlpHas(input, 'reschedule', 'move', 'change time')) {
-      const newDate = nlpExtractDate(input);
-      const newTime = nlpExtractTime(input);
-      if (!m.days && (newDate || newTime)) {
-        const conflict = nlpCheckConflict(newDate || m.date, newTime || m.time);
-        if (conflict && conflict.id !== m.id) {
-          aiBotMsg(`⚠️ You already have <strong>${conflict.subject}</strong> around that time. Reschedule anyway?`, [
-            { label: 'Yes, reschedule', fn: () => rescheduleViaAI(m, newDate, newTime) },
-            { label: 'Cancel', fn: () => aiBotMsg('Okay, not rescheduling.') }
-          ]);
-        } else {
-          rescheduleViaAI(m, newDate, newTime);
+
+    const data   = await response.json();
+    const rawReply = data.choices?.[0]?.message?.content || '';
+
+    // Strip <action> tags from displayed text, execute the command
+    const actionMatch  = rawReply.match(/<action>([\s\S]*?)<\/action>/);
+    const displayReply = rawReply.replace(/<action>[\s\S]*?<\/action>/g, '').trim() || '✅ Done!';
+    const actionBtns   = [];
+
+    if (actionMatch) {
+      try {
+        const cmd = JSON.parse(actionMatch[1].trim());
+
+        switch (cmd.type) {
+          case 'navigate':
+            actionBtns.push({
+              label: `📍 Go to ${cmd.page}`,
+              fn: () => aiAction('navigate', { page: cmd.page })
+            });
+            break;
+
+          case 'open-new-meeting':
+            actionBtns.push({ label: '➕ Open form', fn: () => aiAction('open-new-meeting') });
+            break;
+
+          case 'prefill-meeting':
+            actionBtns.push({
+              label: `➕ Create "${cmd.subject || 'Meeting'}"`,
+              fn: () => aiAction('prefill-meeting', {
+                subject: cmd.subject, date: cmd.date, time: cmd.time, platform: cmd.platform
+              })
+            });
+            break;
+
+          case 'join-meeting':
+            if (cmd.link) actionBtns.push({
+              label: '▶ Join now',
+              fn: () => aiAction('join-meeting', { link: cmd.link })
+            });
+            break;
+
+          case 'delete-meeting': {
+            const target = getMeetings().find(m => m.id === cmd.id)
+                        || getRecurring().find(r => r.id === cmd.id);
+            if (target) {
+              actionBtns.push({
+                label: `🗑 Delete "${target.subject}"`,
+                fn: () => {
+                  target.days ? deleteRecurring(target.id) : deleteMeeting(target.id);
+                  aiBotMsg(`✅ <strong>${target.subject}</strong> deleted.`);
+                }
+              });
+              actionBtns.push({ label: 'Cancel', fn: () => aiBotMsg('👍 Kept it!') });
+            }
+            break;
+          }
+
+          case 'reschedule-meeting': {
+            const target = getMeetings().find(m => m.id === cmd.id);
+            if (target) {
+              actionBtns.push({
+                label: `📅 Reschedule "${target.subject}"`,
+                fn: () => rescheduleViaAI(target, cmd.date || null, cmd.time || null)
+              });
+              actionBtns.push({ label: 'Cancel', fn: () => aiBotMsg('👍 Not rescheduled.') });
+            }
+            break;
+          }
+
+          case 'open-settings':
+            actionBtns.push({
+              label: '⚙️ Open settings',
+              fn: () => aiAction('open-settings', { tab: cmd.tab || 'profile' })
+            });
+            break;
         }
-      } else {
-        aiBotMsg(`Got it! I'll open the edit form for <strong>${m.subject}</strong>.`, [
-          { label: '✏️ Edit', fn: () => { toggleAI(); openEditModal(m.id); } }
-        ]);
-      }
-      return;
-    }
-  }
-
-  // ── INTENT: Greetings
-  if (nlpHas(input, 'hello','hi','hey','sup','yo','good morning','good afternoon','good evening')) {
-    const h = new Date().getHours();
-    const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-    aiBotMsg(`${greet}, ${userName}! 👋 I can schedule meetings, find info, join calls, and control the app. What do you need?`);
-    return;
-  }
-
-  // ── INTENT: Help
-  if (nlpHas(input, 'help','what can you','capabilities','commands')) {
-    aiBotMsg(`Here's everything I can do:<br><br>
-      <strong>📋 Info</strong><br>
-      • "Meetings today / this week / last Monday"<br>
-      • "When is my next meeting?"<br>
-      • "Show all Zoom / Meet / Jitsi meetings"<br>
-      • "When am I free today?"<br>
-      • "What's my busiest day?"<br>
-      • "Show past meetings"<br><br>
-      <strong>⚡ Actions</strong><br>
-      • "Schedule a meeting tomorrow at 3pm"<br>
-      • "Reschedule my standup to 10am"<br>
-      • "Delete my 3pm meeting"<br>
-      • "Join my next meeting"<br>
-      • "Open calendar / analytics / settings"<br><br>
-      <strong>🧠 Context memory</strong><br>
-      • After finding a meeting: "join it", "delete it", "reschedule it to Friday"<br><br>
-      <strong>🎤 Voice</strong><br>
-      • Tap the mic button and speak naturally`);
-    return;
-  }
-
-  // ── INTENT: Today's meetings
-  if (nlpHas(input, 'today', 'this morning', 'this afternoon') && !nlpHas(input, 'free', 'available', 'slot')) {
-    const todayOnce = meetings.filter(m => m.date === today);
-    const todayRec  = recurring.filter(r => r.days.includes(todayDay));
-    const all = [...todayOnce, ...todayRec.map(r => ({...r, isRec: true}))];
-    _aiLastIntent = 'today';
-    if (!all.length) {
-      aiBotMsg(`No meetings today, ${userName}! 🎉 Enjoy the free time.`,
-        [{ label: '➕ Schedule one', fn: () => aiAction('open-new-meeting') }]);
-    } else {
-      all.sort((a, b) => a.time.localeCompare(b.time));
-      const list = all.map(m =>
-        `• <strong>${m.subject}</strong> at ${m.time} ${m.isRec ? '🔄' : ''} ` +
-        `<button class="ai-inline-btn" onclick="window.open('${m.link || buildLink(m.platform, m.code)}','_blank')">▶ Join</button>`
-      ).join('<br>');
-      aiBotMsg(`You have <strong>${all.length}</strong> meeting${all.length > 1 ? 's' : ''} today:<br><br>${list}`);
-    }
-    return;
-  }
-
-  // ── INTENT: Past meetings
-  if (nlpHas(input, 'past', 'previous', 'last week', 'yesterday', 'last monday', 'last tuesday', 'last wednesday', 'last thursday', 'last friday')) {
-    let filterDate = null;
-    if (nlpHas(input, 'yesterday')) { const d = new Date(); d.setDate(d.getDate()-1); filterDate = d.toISOString().slice(0,10); }
-    else if (nlpHas(input, 'last monday'))    { const d = new Date(); d.setDate(d.getDate() - ((d.getDay()+6)%7+1)); filterDate = d.toISOString().slice(0,10); }
-    const past = filterDate
-      ? meetings.filter(m => m.date === filterDate)
-      : meetings.filter(m => m.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
-    if (!past.length) {
-      aiBotMsg(`No past meetings found.`);
-    } else {
-      aiBotMsg(`<strong>${past.length}</strong> past meeting(s):<br><br>` +
-        past.map(m => `• <strong>${m.subject}</strong> — ${m.date} at ${m.time}`).join('<br>'));
-    }
-    return;
-  }
-
-  // ── INTENT: Free slots
-  if (nlpHas(input, 'free', 'available', 'slot', 'gap', 'when can i', 'open time')) {
-    const targetDate = nlpExtractDate(input) || today;
-    const slots = nlpFreeSlots(targetDate);
-    if (!slots.length) {
-      aiBotMsg(`No free slots found on <strong>${targetDate}</strong> within your working hours.`);
-    } else {
-      aiBotMsg(`Free slots on <strong>${targetDate}</strong>:<br><br>` +
-        slots.map(s => `• ${s}`).join('<br>') +
-        `<br><br><em>Based on your working hours and existing meetings.</em>`,
-        [{ label: '➕ Schedule in a slot', fn: () => aiAction('prefill-meeting', { date: targetDate }) }]);
-    }
-    return;
-  }
-
-  // ── INTENT: Next meeting
-  if (nlpHas(input, 'next meeting', 'upcoming', 'next up', 'soon')) {
-    const now    = new Date();
-    const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const laterToday = meetings.filter(m => m.date === today && m.time > nowStr).sort((a,b) => a.time.localeCompare(b.time));
-    const m = laterToday[0] || meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date))[0];
-    if (m) {
-      _aiLastResult = m; _aiLastIntent = 'next';
-      aiBotMsg(`Next: <strong>${m.subject}</strong> on <strong>${m.date === today ? 'today' : m.date}</strong> at ${m.time} (${m.platform === 'meet' ? 'Google Meet' : m.platform}).`,
-        [
-          { label: '▶ Join', fn: () => aiAction('join-meeting', { link: m.link || buildLink(m.platform, m.code) }) },
-          { label: '✏️ Reschedule', fn: () => { toggleAI(); openEditModal(m.id); } }
-        ]);
-    } else {
-      aiBotMsg(`No upcoming meetings!`, [{ label: '➕ Schedule', fn: () => aiAction('open-new-meeting') }]);
-    }
-    return;
-  }
-
-  // ── INTENT: Filter by platform
-  if (nlpHas(input, 'zoom meetings', 'all zoom', 'meet meetings', 'all meet', 'jitsi meetings', 'all jitsi', 'show zoom', 'show meet', 'show jitsi', 'filter by')) {
-    const plat = nlpExtractPlatform(input);
-    const platName = plat === 'meet' ? 'Google Meet' : plat === 'zoom' ? 'Zoom' : 'Jitsi';
-    const filtered = [...meetings, ...recurring].filter(m => m.platform === plat);
-    if (!filtered.length) {
-      aiBotMsg(`No ${platName} meetings found.`);
-    } else {
-      aiBotMsg(`<strong>${filtered.length}</strong> ${platName} meeting(s):<br><br>` +
-        filtered.map(m =>
-          `• <strong>${m.subject}</strong> — ${m.days ? m.days.join(',') : m.date} at ${m.time} ` +
-          `<button class="ai-inline-btn" onclick="window.open('${m.link || buildLink(m.platform, m.code)}','_blank')">▶</button>`
-        ).join('<br>'));
-    }
-    return;
-  }
-
-  // ── INTENT: Join
-  if (nlpHas(input, 'join', 'open meeting', 'start meeting')) {
-    const found = nlpFindMeeting(input);
-    if (found) {
-      _aiLastResult = found;
-      aiAction('join-meeting', { link: found.link || buildLink(found.platform, found.code) });
-      aiBotMsg(`Opening <strong>${found.subject}</strong>! 🚀`);
-    } else {
-      const now    = new Date();
-      const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      const next   = meetings.filter(m => m.date === today && m.time >= nowStr).sort((a,b) => a.time.localeCompare(b.time))[0]
-                  || meetings.filter(m => m.date > today).sort((a,b) => a.date.localeCompare(b.date))[0];
-      if (next) {
-        _aiLastResult = next;
-        aiBotMsg(`Next meeting: <strong>${next.subject}</strong>`,
-          [{ label: '▶ Join', fn: () => aiAction('join-meeting', { link: next.link || buildLink(next.platform, next.code) }) }]);
-      } else {
-        aiBotMsg(`No meetings found to join.`);
-      }
-    }
-    return;
-  }
-
-  // ── INTENT: Reschedule
-  if (nlpHas(input, 'reschedule', 'move', 'change time', 'change date')) {
-    const found   = nlpFindMeeting(input);
-    const newDate = nlpExtractDate(input);
-    const newTime = nlpExtractTime(input);
-    if (found) {
-      _aiLastResult = found;
-      if (!found.days && (newDate || newTime)) {
-        const conflict = nlpCheckConflict(newDate || found.date, newTime || found.time);
-        if (conflict && conflict.id !== found.id) {
-          aiBotMsg(`⚠️ Conflict: <strong>${conflict.subject}</strong> is already at that time. Reschedule anyway?`, [
-            { label: 'Yes, reschedule', fn: () => rescheduleViaAI(found, newDate, newTime) },
-            { label: 'Cancel', fn: () => aiBotMsg('Cancelled.') }
-          ]);
-        } else {
-          rescheduleViaAI(found, newDate, newTime);
-        }
-      } else {
-        aiBotMsg(`I'll open the edit form for <strong>${found.subject}</strong>.`,
-          [{ label: '✏️ Edit', fn: () => { toggleAI(); openEditModal(found.id); } }]);
-      }
-    } else {
-      aiBotMsg(`Which meeting do you want to reschedule? Say "reschedule [meeting name] to [time/date]".`);
-    }
-    return;
-  }
-
-  // ── INTENT: Schedule / create
-  if (nlpHas(input, 'schedule','create','add','new meeting','book','set up','arrange')) {
-    const date     = nlpExtractDate(input);
-    const time     = nlpExtractTime(input);
-    const platform = nlpExtractPlatform(input);
-    let subject    = '';
-    const calledMatch = input.match(/(?:called|titled|named|for)\s+["'']?([a-z0-9 ]+?)["'']?(?:\s+(?:at|on|with|using)|$)/i);
-    if (calledMatch) subject = calledMatch[1].trim();
-
-    // Conflict check
-    if (date && time) {
-      const conflict = nlpCheckConflict(date, time);
-      if (conflict) {
-        aiBotMsg(`⚠️ You already have <strong>${conflict.subject}</strong> around ${time} on ${date}. Schedule anyway?`, [
-          { label: 'Yes, schedule', fn: () => aiAction('prefill-meeting', { subject, date, time, platform }) },
-          { label: 'Find free slot', fn: () => askAI(`when am I free on ${date}`) },
-          { label: 'Cancel', fn: () => aiBotMsg('Cancelled.') }
-        ]);
-        return;
+      } catch (e) {
+        console.warn('Groq action parse error:', e, actionMatch[1]);
       }
     }
 
-    if (date || time) {
-      aiBotMsg(`Got it!${subject ? ' For "' + subject + '".' : ''} Opening form${date ? ' for ' + date : ''}${time ? ' at ' + time : ''} 📝`,
-        [{ label: '➕ Open form', fn: () => aiAction('prefill-meeting', { subject, date, time, platform }) }]);
-    } else {
-      aiBotMsg(`Opening the meeting form.`, [{ label: '➕ New meeting', fn: () => aiAction('open-new-meeting') }]);
-    }
-    return;
-  }
+    aiBotMsg(displayReply, actionBtns);
 
-  // ── INTENT: Delete
-  if (nlpHas(input, 'delete','remove','cancel','clear')) {
-    const found = nlpFindMeeting(input);
-    if (found) {
-      _aiLastResult = found;
-      aiBotMsg(`Delete <strong>${found.subject}</strong>${found.date ? ' on ' + found.date : ''}?`, [
-        { label: '🗑 Yes, delete', fn: () => {
-            found.days ? deleteRecurring(found.id) : deleteMeeting(found.id);
-            aiBotMsg(`✅ <strong>${found.subject}</strong> deleted.`);
-            _aiLastResult = null;
-        }},
-        { label: 'Cancel', fn: () => aiBotMsg('Keeping it!') }
-      ]);
-    } else {
-      const upcoming = meetings.filter(m => m.date >= today).sort((a,b) => a.date.localeCompare(b.date)).slice(0, 5);
-      aiBotMsg(`Which meeting? Say "delete [name]".<br><br>` +
-        upcoming.map(m => `• <strong>${m.subject}</strong> — ${m.date}`).join('<br>'));
-    }
-    return;
+  } catch (e) {
+    aiHideTyping();
+    aiBotMsg(`❌ Could not reach Groq. Check your connection or API key.<br><em>${e.message}</em>`);
   }
-
-  // ── INTENT: Find / search
-  if (nlpHas(input, 'find','search','look for','where is','show me')) {
-    const found = nlpFindMeeting(input);
-    if (found) {
-      _aiLastResult = found; _aiLastIntent = 'found';
-      const isRec = !!found.days;
-      aiBotMsg(
-        `Found: <strong>${found.subject}</strong><br>` +
-        `${isRec ? '🔄 ' + found.days.join(', ') : '📅 ' + found.date} at ${found.time}<br>` +
-        `Platform: ${found.platform === 'meet' ? 'Google Meet' : found.platform}`,
-        [
-          { label: '▶ Join', fn: () => aiAction('join-meeting', { link: found.link || buildLink(found.platform, found.code) }) },
-          { label: '✏️ Edit', fn: () => { toggleAI(); if (isRec) openRecurringEdit(found.id); else openEditModal(found.id); } },
-          { label: '🗑 Delete', fn: () => askAI(`delete ${found.subject}`) }
-        ]
-      );
-    } else {
-      aiBotMsg(`Couldn't find that meeting.`, [{ label: '🔍 All Meetings', fn: () => aiAction('navigate', { page: 'meetings' }) }]);
-    }
-    return;
-  }
-
-  // ── INTENT: Summary
-  if (nlpHas(input, 'summary','overview','stats','how many','count','total')) {
-    const todayCount = meetings.filter(m => m.date === today).length + recurring.filter(r => r.days.includes(todayDay)).length;
-    const future     = meetings.filter(m => m.date > today);
-    const past       = meetings.filter(m => m.date < today);
-    const platforms  = {};
-    [...meetings, ...recurring].forEach(m => { platforms[m.platform] = (platforms[m.platform] || 0) + 1; });
-    const topPlat = Object.entries(platforms).sort((a,b) => b[1]-a[1])[0];
-    aiBotMsg(
-      `Meeting overview for <strong>${userName}</strong>:<br><br>` +
-      `📋 <strong>${meetings.length}</strong> one-time &nbsp;🔄 <strong>${recurring.length}</strong> recurring<br>` +
-      `📅 <strong>${todayCount}</strong> today &nbsp;⏭ <strong>${future.length}</strong> upcoming<br>` +
-      `📂 <strong>${past.length}</strong> past meetings<br>` +
-      `${topPlat ? `🏆 Top platform: <strong>${topPlat[0] === 'meet' ? 'Google Meet' : topPlat[0]}</strong> (${topPlat[1]})` : ''}`,
-      [{ label: '📊 Full analytics', fn: () => aiAction('navigate', { page: 'analytics' }) }]
-    );
-    return;
-  }
-
-  // ── INTENT: This week
-  if (nlpHas(input, 'this week', 'week')) {
-    const now   = new Date();
-    const start = new Date(now); start.setDate(now.getDate() - now.getDay());
-    const end   = new Date(start); end.setDate(start.getDate() + 6);
-    const thisWeek = meetings.filter(m => m.date >= start.toISOString().slice(0,10) && m.date <= end.toISOString().slice(0,10));
-    aiBotMsg(thisWeek.length
-      ? `This week: <strong>${thisWeek.length}</strong> meeting(s):<br><br>` +
-        thisWeek.sort((a,b) => a.date.localeCompare(b.date)).map(m => `• <strong>${m.subject}</strong> — ${m.date} at ${m.time}`).join('<br>')
-      : 'No meetings this week.',
-      [{ label: '📆 Calendar', fn: () => aiAction('navigate', { page: 'calendarPage' }) }]
-    );
-    return;
-  }
-
-  // ── INTENT: Recurring
-  if (nlpHas(input, 'recurring','repeat','every week','weekly','daily')) {
-    if (!recurring.length) {
-      aiBotMsg(`No recurring meetings yet.`, [{ label: '➕ Create', fn: () => aiAction('navigate', { page: 'dashboard' }) }]);
-    } else {
-      aiBotMsg(`<strong>${recurring.length}</strong> recurring meeting(s):<br><br>` +
-        recurring.map(r => `• <strong>${r.subject}</strong> — ${r.days.join(', ')} at ${r.time}`).join('<br>'));
-    }
-    return;
-  }
-
-  // ── INTENT: Navigation
-  if (nlpHas(input, 'go to','open','navigate','show me','take me')) {
-    if (nlpHas(input, 'dashboard','home'))              { aiBotMsg('Dashboard! 🏠');     setTimeout(() => aiAction('navigate', { page: 'dashboard' }), 400);     return; }
-    if (nlpHas(input, 'calendar'))                        { aiBotMsg('Calendar! 📆');       setTimeout(() => aiAction('navigate', { page: 'calendarPage' }), 400);  return; }
-    if (nlpHas(input, 'analytics','stats','charts'))  { aiBotMsg('Analytics! 📊');      setTimeout(() => aiAction('navigate', { page: 'analytics' }), 400);     return; }
-    if (nlpHas(input, 'meetings','all meeting'))        { aiBotMsg('All Meetings! 📋');    setTimeout(() => aiAction('navigate', { page: 'meetings' }), 400);       return; }
-    if (nlpHas(input, 'settings','profile','account')) {
-      const tab = nlpHas(input,'notification')?'notifications':nlpHas(input,'appear','theme')?'appearance':nlpHas(input,'security')?'security':'profile';
-      aiBotMsg('Settings! ⚙️'); setTimeout(() => aiAction('open-settings', { tab }), 400); return;
-    }
-  }
-
-  // ── INTENT: Time / date
-  if (nlpHas(input, 'what time', 'current time', 'date today')) {
-    const now = new Date();
-    aiBotMsg(`It's <strong>${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</strong> — ${now.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}.`);
-    return;
-  }
-
-  // ── INTENT: Busiest day
-  if (nlpHas(input, 'busiest','most meetings','heavy','packed')) {
-    const days = {Mon:0,Tue:0,Wed:0,Thu:0,Fri:0,Sat:0,Sun:0};
-    meetings.forEach(m => { const d = new Date(m.date+'T12:00:00').toLocaleString('default',{weekday:'short'}); if(days[d]!==undefined) days[d]++; });
-    recurring.forEach(r => r.days.forEach(d => { if(days[d]!==undefined) days[d]++; }));
-    const busiest = Object.entries(days).sort((a,b) => b[1]-a[1])[0];
-    aiBotMsg(busiest[1] > 0
-      ? `Busiest day: <strong>${busiest[0]}</strong> with ${busiest[1]} meeting(s).`
-      : `Not enough data to determine busiest day.`);
-    return;
-  }
-
-  // ── INTENT: Availability
-  if (nlpHas(input, 'availability','working hours','my hours')) {
-    const avail = s.availability;
-    aiBotMsg(
-      `Working hours: <strong>${avail?.start||'09:00'}</strong> to <strong>${avail?.end||'17:00'}</strong><br>` +
-      `Buffer: <strong>${avail?.buffer||0} min</strong> between meetings<br>` +
-      `Max per day: <strong>${avail?.maxPerDay||10}</strong>`,
-      [{ label: '⚙️ Edit availability', fn: () => aiAction('open-settings', { tab: 'availability' }) }]
-    );
-    return;
-  }
-
-  // ── Fallback: try to match a meeting name
-  const mentioned = nlpFindMeeting(input);
-  if (mentioned) {
-    _aiLastResult = mentioned;
-    const isRec = !!mentioned.days;
-    aiBotMsg(
-      `Found <strong>${mentioned.subject}</strong>:<br>` +
-      `${isRec ? '🔄 '+mentioned.days.join(', ') : '📅 '+mentioned.date} at ${mentioned.time}`,
-      [
-        { label: '▶ Join', fn: () => aiAction('join-meeting', { link: mentioned.link || buildLink(mentioned.platform, mentioned.code) }) },
-        { label: '✏️ Edit', fn: () => { toggleAI(); isRec ? openRecurringEdit(mentioned.id) : openEditModal(mentioned.id); } }
-      ]
-    );
-    return;
-  }
-
-  aiBotMsg(`Not sure what you mean. Try: <em>"meetings today"</em>, <em>"when am I free"</em>, <em>"reschedule my standup to 2pm"</em>, or <em>"open the calendar"</em>.`);
 }
 
 // ── Reschedule a meeting via AI (direct update to Supabase)
@@ -2254,6 +2132,12 @@ function initApp() {
     document.getElementById('sidebar')?.classList.add('collapsed');
   }
 
+  // Reflect Grok key status in subtitle
+  if (getGrokApiKey()) {
+    const subtitle = document.getElementById('aiSubtitle');
+    if (subtitle) subtitle.textContent = 'Smart assistant · Powered by Groq ✅';
+  }
+
   refreshAll();
   updateClock();
   loadSettings('profile', document.querySelector('.settings-tab'));
@@ -2324,6 +2208,8 @@ window.aiUpdateSuggestions = aiUpdateSuggestions;
 window.aiClearChat         = aiClearChat;
 window.aiVoiceInput        = aiVoiceInput;
 window.aiCopyMsg           = aiCopyMsg;
+window.toggleGrokKeyPanel  = toggleGrokKeyPanel;
+window.applyGrokKey        = applyGrokKey;
 window.toggleBotEnabled       = toggleBotEnabled;
 window.updateNoveltyFeatures  = updateNoveltyFeatures;
 window.updateSmartSuggestions = updateSmartSuggestions;
